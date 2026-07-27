@@ -1,0 +1,40 @@
+# Secrets: keep provider and deployment credentials out of Git.
+.env
+.env.*
+**/.env
+**/.env.*
+backend/.env
+!.env.example
+*.pem
+*.key
+*.p12
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
+venv/
+
+# JavaScript / Next.js
+node_modules/
+.next/
+dist/
+coverage/
+
+# Local data and generated artifacts
+data/source_docs/
+data/uploads/
+storage/
+qdrant_storage/
+*.sqlite
+*.db
+
+# Editors and operating systems
+.vscode/
+.idea/
+*.swp
+Thumbs.db
+.DS_Store
