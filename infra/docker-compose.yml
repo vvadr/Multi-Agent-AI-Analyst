@@ -1,3 +1,14 @@
+# Local DEVELOPMENT stack.
+# Runs the data services locally so the backend can work entirely against local
+# infrastructure instead of the connected (production) services: Postgres,
+# Qdrant, and MinIO (S3-compatible object storage).
+#
+# Two ways to use it:
+#   A) Data stores only + hot-reload backend on the host (recommended for dev):
+#        docker compose -f infra/docker-compose.yml up -d postgres qdrant minio createbuckets
+#        cd backend; uvicorn app.main:app --reload --port 8000   # APP_ENV=development
+#   B) Full stack in Docker (backend included):
+#        docker compose -f infra/docker-compose.yml up --build
 services:
   postgres:
     image: postgres:16-alpine
@@ -23,14 +34,43 @@ services:
     volumes:
       - qdrant_data:/qdrant/storage
 
+  minio:
+    image: minio/minio:latest
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    ports:
+      - "9000:9000"   # S3 API
+      - "9001:9001"   # web console (http://localhost:9001, minioadmin/minioadmin)
+    volumes:
+      - minio_data:/data
+
+  # Creates the object-storage bucket on startup, then exits.
+  createbuckets:
+    image: minio/mc:latest
+    depends_on:
+      - minio
+    entrypoint: >
+      /bin/sh -c "
+      until /usr/bin/mc alias set local http://minio:9000 minioadmin minioadmin; do echo 'waiting for minio'; sleep 2; done;
+      /usr/bin/mc mb -p local/analyst-documents;
+      exit 0;
+      "
+
   api:
     build:
       context: ../backend
     env_file:
-      - ../backend/.env
+      - ../backend/.env.development
     environment:
+      APP_ENV: development
+      # Override the localhost endpoints from .env.development with the
+      # in-network service hostnames (the localhost values are for a
+      # host-run uvicorn hitting the published ports).
       DATABASE_URL: postgresql+psycopg://analyst:analyst@postgres:5432/analyst
       QDRANT_URL: http://qdrant:6333
+      OBJECT_STORAGE_ENDPOINT: http://minio:9000
     ports:
       - "8000:8000"
     depends_on:
@@ -38,7 +78,10 @@ services:
         condition: service_healthy
       qdrant:
         condition: service_started
+      minio:
+        condition: service_started
 
 volumes:
   postgres_data:
   qdrant_data:
+  minio_data:

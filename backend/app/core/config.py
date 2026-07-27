@@ -1,3 +1,4 @@
+import os
 from functools import lru_cache
 from pathlib import Path
 
@@ -8,11 +9,36 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 BACKEND_DIRECTORY = Path(__file__).resolve().parents[2]
 
 
+def _select_env_file() -> Path:
+    """Choose which .env file to load based on the run mode.
+
+    Priority:
+    1. An explicit ``ENV_FILE`` path (handy for Docker/CI).
+    2. ``.env.<APP_ENV>`` — e.g. ``.env.development`` (local services) or
+       ``.env.production`` (connected services).
+    3. Plain ``.env`` as a fallback.
+
+    ``APP_ENV`` is read from the process environment set by the launch command,
+    so it selects the mode. On managed hosts (Render) variables are injected
+    directly into the environment; a missing file is fine — pydantic then reads
+    process env vars only.
+    """
+    explicit = os.getenv("ENV_FILE")
+    if explicit:
+        return Path(explicit)
+    app_env = os.getenv("APP_ENV", "development")
+    candidate = BACKEND_DIRECTORY / f".env.{app_env}"
+    if candidate.exists():
+        return candidate
+    return BACKEND_DIRECTORY / ".env"
+
+
 class Settings(BaseSettings):
-    """Server configuration loaded from environment variables or backend/.env."""
+    """Server configuration loaded from process env vars or a mode-specific
+    ``backend/.env.<APP_ENV>`` file (see :func:`_select_env_file`)."""
 
     model_config = SettingsConfigDict(
-        env_file=BACKEND_DIRECTORY / ".env",
+        env_file=_select_env_file(),
         env_file_encoding="utf-8",
         case_sensitive=False,
         extra="ignore",

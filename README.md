@@ -30,12 +30,16 @@ python -m venv .venv
 .\.venv\Scripts\Activate.ps1
 python -m pip install --upgrade pip
 python -m pip install -e ".[dev]"
-Copy-Item .env.example .env
-# Add your own values to .env. Do not commit it.
+Copy-Item .env.development.example .env.development
+# Fill GEMINI_API_KEY and a dev JWT_SECRET_KEY in .env.development. Do not commit it.
 uvicorn app.main:app --reload --port 8000
 ```
 
 Then open `http://localhost:8000/docs` and `http://localhost:8000/healthz`.
+
+Development mode runs against local Docker services (Postgres, Qdrant, MinIO);
+production mode uses the connected services. `APP_ENV` selects the mode — see
+[Running environments](docs/ENVIRONMENTS.md).
 
 ## Start the frontend locally
 

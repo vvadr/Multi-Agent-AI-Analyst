@@ -14,17 +14,21 @@ python -m venv .venv
 .\.venv\Scripts\Activate.ps1
 python -m pip install --upgrade pip
 python -m pip install -e ".[dev]"
-Copy-Item .env.example .env
+Copy-Item .env.development.example .env.development
 ```
 
-Set the minimum local values in `backend/.env`:
+`APP_ENV` defaults to `development`, so the backend loads `.env.development`.
+That file already targets the local Docker services; set the two secrets with no
+local equivalent in `backend/.env.development`:
 
 ```env
-GEMINI_API_KEY=your-rotated-key
-JWT_SECRET_KEY=a-new-random-secret
+GEMINI_API_KEY=your-key
+JWT_SECRET_KEY=a-random-dev-secret
 ```
 
-Do not place any value in `.env.example`, Git, chat, screenshots, or issue trackers.
+Do not place any value in a committed `*.example` file, Git, chat, screenshots,
+or issue trackers. For the full dev/prod split see
+[ENVIRONMENTS.md](ENVIRONMENTS.md).
 
 ## Run and verify
 
@@ -38,12 +42,21 @@ ruff check .
 - `GET http://localhost:8000/readyz` reports whether database, Gemini, and Qdrant configuration values exist. It never returns credentials.
 - `GET http://localhost:8000/docs` exposes the development OpenAPI interface.
 
-## Optional local infrastructure
+## Local infrastructure (Docker)
 
-After Docker Desktop is installed and running:
+Development mode runs against local Postgres, Qdrant, and MinIO. After Docker
+Desktop is installed and running, start the data services:
+
+```powershell
+docker compose -f ..\infra\docker-compose.yml up -d postgres qdrant minio createbuckets
+```
+
+Then run the backend on the host (hot reload) as above. To run the whole stack
+(backend included) in Docker instead:
 
 ```powershell
 docker compose -f ..\infra\docker-compose.yml up --build
 ```
 
-Use local infrastructure only for development. Hosted database/vector services are required for the public pilot because Render's filesystem is ephemeral.
+Use local infrastructure only for development. Hosted database/vector services
+are required for the public pilot because Render's filesystem is ephemeral.

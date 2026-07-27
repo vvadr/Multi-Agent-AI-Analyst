@@ -4,6 +4,8 @@
 .env.local
 .env.*.local
 backend/.env
+backend/.env.development
+backend/.env.production
 frontend/.env.production
 # Non-secret, committed templates and framework env files are allowed:
 #   backend/.env.example, frontend/.env.example,

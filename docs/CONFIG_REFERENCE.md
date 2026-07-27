@@ -7,7 +7,9 @@ how to obtain them, see [KEY_SETUP_GUIDE.md](KEY_SETUP_GUIDE.md).
 Legend:
 
 - **Secret?** 🔑 = keep server-side, never commit · ⚙️ = plain setting, safe to commit as a default.
-- Backend vars come from `backend/.env` (source of truth: `backend/app/core/config.py`).
+- Backend vars come from the mode file `backend/.env.<APP_ENV>` — `.env.development`
+  (local services) or `.env.production` (connected services); source of truth:
+  `backend/app/core/config.py`. See [ENVIRONMENTS.md](ENVIRONMENTS.md).
 - Frontend vars come from `frontend/.env.*` and must be prefixed `NEXT_PUBLIC_`.
 
 ---
