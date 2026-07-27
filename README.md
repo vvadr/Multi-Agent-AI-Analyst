@@ -1,13 +1,26 @@
 # Multi-Agent AI Analyst
 
-Custom backend foundation for a multi-agent analyst. The frontend is intentionally outside this repository workstream.
+A multi-agent analyst with a custom FastAPI backend and a Next.js frontend.
+
+## Ownership
+
+- **Backend** — custom FastAPI service: API, auth, agents, data, ingestion,
+  deployment. (see [`backend/`](backend/))
+- **Frontend** — **owned and implemented by Claude**: the Next.js browser UI
+  that consumes the backend's OpenAPI + SSE contract. (see [`frontend/`](frontend/))
+
+The frontend never holds provider, database, or model secrets — it only calls
+the backend API.
 
 ## Current foundation
 
 - FastAPI service with versioned API routing and health/readiness endpoints.
+- Next.js (App Router, TypeScript, Tailwind) frontend with a typed API client
+  and a live backend-status panel.
 - Typed, server-only environment configuration.
-- Dependency management, tests, linting, Docker, GitHub Actions, and a Render deployment template.
-- A complete secret template in `backend/.env.example`.
+- Dependency management, tests, linting, Docker, GitHub Actions, and a Render
+  deployment template.
+- Complete secret templates in `backend/.env.example` and `frontend/.env.example`.
 
 ## Start the backend locally
 
@@ -24,4 +37,27 @@ uvicorn app.main:app --reload --port 8000
 
 Then open `http://localhost:8000/docs` and `http://localhost:8000/healthz`.
 
-Read [local setup](docs/LOCAL_SETUP.md), the [deployment runbook](docs/DEPLOYMENT_RUNBOOK.md), and the [implementation scope](docs/IMPLEMENTATION_SCOPE.md) before deploying.
+## Start the frontend locally
+
+```powershell
+cd frontend
+npm install
+npm run dev
+```
+
+Then open `http://localhost:3000`. `.env.development` already points it at the
+local backend.
+
+## Documentation
+
+- [Running environments (dev vs prod)](docs/ENVIRONMENTS.md)
+- [Environment keys — what to get](docs/ENVIRONMENT_KEYS.md)
+- [Key setup guide — step by step](docs/KEY_SETUP_GUIDE.md)
+- [Configuration reference — every variable](docs/CONFIG_REFERENCE.md)
+- [Branching model](docs/BRANCHING.md)
+- [Local setup](docs/LOCAL_SETUP.md)
+- [Deployment runbook](docs/DEPLOYMENT_RUNBOOK.md)
+- [Implementation scope](docs/IMPLEMENTATION_SCOPE.md)
+- [Frontend README](frontend/README.md)
+
+Read these before deploying.

@@ -2,11 +2,11 @@
 
 ## Ownership
 
-The project will be built as a custom application. The implementation owner is responsible for every server-side and platform component below. The frontend team owns the browser UI and visual design only.
+The project will be built as a custom application. The backend implementation owner is responsible for every server-side and platform component below. **Claude owns the frontend** — the browser UI, its components, styling, and integration against the documented API.
 
 | Area | Owner | Notes |
 | --- | --- | --- |
-| Frontend UI, pages, components, styling | Frontend team | Consumes the documented API and streaming events. |
+| Frontend UI, pages, components, styling | Claude | Consumes the documented API and streaming events. |
 | Public API, authentication, authorization, and rate limits | Backend | Custom FastAPI implementation; no backend-as-a-service application logic. |
 | Agent graph, prompts, model integration, retrieval, SQL, evaluation | Backend | Custom LangGraph application and tool adapters. |
 | Data model, migrations, row-level authorization, audit trail | Backend | Schema and migrations are source-controlled. |
@@ -51,7 +51,7 @@ multi-agent-ai-analyst/
 │   ├── tests/
 │   ├── Dockerfile
 │   └── pyproject.toml
-├── frontend/                 # Owned and implemented by the frontend team
+├── frontend/                 # Owned and implemented by Claude (Next.js)
 ├── database/
 │   ├── migrations/
 │   └── seed/
@@ -71,7 +71,7 @@ multi-agent-ai-analyst/
 ## Custom Backend Architecture
 
 ```text
-Frontend (owned by frontend team)
+Frontend (owned by Claude)
        │ HTTPS + JWT + SSE
        ▼
 Custom FastAPI API
@@ -99,9 +99,9 @@ Managed services are replaceable adapters, not the application backend:
 - **Gemini:** supplies LLM and embedding calls through a server-only adapter.
 - **Render and Vercel:** host independently deployable backend and frontend applications from the same repository.
 
-## API Contract for the Frontend Team
+## API Contract for the Frontend
 
-The backend will publish a versioned OpenAPI contract. The frontend should not call databases, Qdrant, Gemini, or storage providers directly.
+The backend will publish a versioned OpenAPI contract. Claude's frontend consumes it and must not call databases, Qdrant, Gemini, or storage providers directly.
 
 Initial endpoints:
 
@@ -154,7 +154,7 @@ The API and worker must never depend on local disk persistence. Files, database 
 4. Build document upload, asynchronous ingestion, Qdrant indexing, tenant-safe retrieval, and citations.
 5. Build the SQL analytics adapter with safe approved views and test cases.
 6. Build the LangGraph state machine: structured router, evidence collection, answer generation, critic, budgets, retries, and persisted run state.
-7. Publish OpenAPI and SSE contracts for the frontend team; integration occurs only through these APIs.
+7. Publish OpenAPI and SSE contracts for the frontend; integration occurs only through these APIs.
 8. Add evaluation datasets for routing, retrieval, SQL correctness, grounded answers, and prompt-injection resistance.
 9. Add tracing, metrics, alerts, backups/export procedures, and incident/rollback runbooks.
 10. Deploy backend to staging, integrate the frontend, perform smoke tests, then conduct a limited pilot rollout.
