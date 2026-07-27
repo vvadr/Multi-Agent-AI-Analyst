@@ -1,0 +1,19 @@
+services:
+  - type: web
+    name: multi-agent-ai-analyst-api
+    runtime: python
+    rootDir: backend
+    buildCommand: python -m pip install --upgrade pip && python -m pip install .
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /healthz
+    envVars:
+      - key: APP_ENV
+        value: production
+      - key: LOG_LEVEL
+        value: INFO
+      - key: API_V1_PREFIX
+        value: /v1
+      - key: ENABLE_WEB_SEARCH
+        value: "false"
+      - key: ENABLE_CODE_EXECUTION
+        value: "false"
