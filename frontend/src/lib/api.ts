@@ -3,25 +3,26 @@
  *
  * This is the ONLY place the frontend should reach out over the network. The
  * backend publishes a versioned OpenAPI + SSE contract (see
- * docs/IMPLEMENTATION_SCOPE.md → "API Contract for the Frontend Team"); the
- * frontend never calls Postgres, Qdrant, Gemini, or storage directly.
+ * docs/IMPLEMENTATION_SCOPE.md); the frontend never calls Postgres, Qdrant,
+ * Gemini, or storage directly.
+ *
+ * Errors surfaced from here are deliberately generic. Backend exception text
+ * and provider error details never reach the UI — only a short, safe message
+ * plus the `X-Request-ID` for log correlation.
  */
 
 import { apiUrl, apiV1Url } from "./config";
+import { parseReadinessReport, type ReadinessReport } from "./readiness";
+
+export type {
+  ComponentReadiness,
+  ReadinessComponent,
+  ReadinessReport,
+} from "./readiness";
 
 /** Shape returned by `GET /healthz`. */
 export interface HealthStatus {
   status: "ok";
-}
-
-/** Shape returned by `GET /readyz`. */
-export interface ReadinessReport {
-  status: "ready" | "not_ready";
-  components: {
-    database: boolean;
-    gemini: boolean;
-    qdrant: boolean;
-  };
 }
 
 /** Typed SSE progress events emitted by `GET /v1/runs/{id}/events`. */
@@ -39,81 +40,189 @@ export interface RunEvent {
   data?: unknown;
 }
 
+const REQUEST_ID_HEADER = "X-Request-ID";
+
+/** Default ceiling for a single request, so the UI can never hang forever. */
+export const DEFAULT_TIMEOUT_MS = 8000;
+
 export class ApiError extends Error {
+  /**
+   * @param status HTTP status, or 0 when the request never completed
+   *   (network failure, timeout, DNS, CORS).
+   * @param requestId `X-Request-ID` from the response, when one was received.
+   */
   constructor(
     message: string,
     readonly status: number,
-    readonly body?: unknown,
+    readonly requestId?: string,
   ) {
     super(message);
     this.name = "ApiError";
   }
 }
 
-interface RequestOptions extends Omit<RequestInit, "body"> {
-  /** Short-lived bearer access token from `POST /v1/auth/login`. */
-  token?: string;
-  /** JSON request body; serialized automatically. */
-  json?: unknown;
-}
-
-async function request<T>(url: string, options: RequestOptions = {}): Promise<T> {
-  const { token, json, headers, ...rest } = options;
-
-  const finalHeaders = new Headers(headers);
-  finalHeaders.set("Accept", "application/json");
-  if (json !== undefined) finalHeaders.set("Content-Type", "application/json");
-  if (token) finalHeaders.set("Authorization", `Bearer ${token}`);
-
-  const response = await fetch(url, {
-    ...rest,
-    headers: finalHeaders,
-    body: json !== undefined ? JSON.stringify(json) : undefined,
-  });
-
-  const raw = await response.text();
-  const parsed = raw ? safeJsonParse(raw) : undefined;
-
-  if (!response.ok) {
-    const detail =
-      (parsed as { detail?: string } | undefined)?.detail ?? response.statusText;
-    throw new ApiError(`${response.status} ${detail}`, response.status, parsed);
-  }
-
-  return parsed as T;
+function requestIdOf(response: Response): string | undefined {
+  return response.headers.get(REQUEST_ID_HEADER) ?? undefined;
 }
 
 function safeJsonParse(raw: string): unknown {
   try {
     return JSON.parse(raw);
   } catch {
-    return raw;
+    return undefined;
   }
+}
+
+interface FetchOptions {
+  signal?: AbortSignal;
+  timeoutMs?: number;
+}
+
+/**
+ * Read a response body defensively.
+ *
+ * `text()` rejects when the body stream fails part-way through — a dropped
+ * connection mid-read. Without this the rejection would escape as a raw
+ * TypeError instead of an `ApiError`, and the UI would fall through to its
+ * generic "unexpected" branch.
+ */
+async function readBody(response: Response): Promise<string> {
+  try {
+    return await response.text();
+  } catch {
+    throw new ApiError(
+      "The connection dropped before the response finished.",
+      response.status,
+      requestIdOf(response),
+    );
+  }
+}
+
+/**
+ * `fetch` with a timeout, normalizing every transport failure into an
+ * `ApiError` with status 0 so callers handle one error type.
+ */
+async function fetchWithTimeout(
+  url: string,
+  init: RequestInit,
+  { signal, timeoutMs = DEFAULT_TIMEOUT_MS }: FetchOptions = {},
+): Promise<Response> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  const onExternalAbort = () => controller.abort();
+  signal?.addEventListener("abort", onExternalAbort);
+
+  try {
+    return await fetch(url, { ...init, signal: controller.signal });
+  } catch {
+    // Deliberately opaque: DNS, CORS, and TLS failures must not leak detail.
+    throw new ApiError("Cannot reach the backend API.", 0);
+  } finally {
+    clearTimeout(timer);
+    signal?.removeEventListener("abort", onExternalAbort);
+  }
+}
+
+interface RequestOptions extends FetchOptions {
+  /** Short-lived bearer access token from `POST /v1/auth/login`. */
+  token?: string;
+  /** JSON request body; serialized automatically. */
+  json?: unknown;
+  method?: string;
+}
+
+async function request<T>(url: string, options: RequestOptions = {}): Promise<T> {
+  const { token, json, method, signal, timeoutMs } = options;
+
+  const headers = new Headers({ Accept: "application/json" });
+  if (json !== undefined) headers.set("Content-Type", "application/json");
+  if (token) headers.set("Authorization", `Bearer ${token}`);
+
+  const response = await fetchWithTimeout(
+    url,
+    {
+      method,
+      headers,
+      body: json !== undefined ? JSON.stringify(json) : undefined,
+    },
+    { signal, timeoutMs },
+  );
+
+  const raw = await readBody(response);
+  const parsed = raw ? safeJsonParse(raw) : undefined;
+
+  if (!response.ok) {
+    throw new ApiError(
+      `Request failed (${response.status}).`,
+      response.status,
+      requestIdOf(response),
+    );
+  }
+  if (parsed === undefined) {
+    throw new ApiError(
+      "The backend returned an unreadable response.",
+      response.status,
+      requestIdOf(response),
+    );
+  }
+
+  return parsed as T;
 }
 
 /* ------------------------------------------------------------------ */
 /* Operations                                                         */
 /* ------------------------------------------------------------------ */
 
-export function getHealth(): Promise<HealthStatus> {
-  return request<HealthStatus>(apiUrl("/healthz"));
+export function getHealth(options: FetchOptions = {}): Promise<HealthStatus> {
+  return request<HealthStatus>(apiUrl("/healthz"), options);
 }
 
 /**
- * `GET /readyz` returns 503 when a dependency is unconfigured, but still sends
- * a JSON body describing which components are ready. We surface that body
- * rather than throwing so a status UI can render partial readiness.
+ * Fetch `GET /readyz`.
+ *
+ * The backend answers 503 when any dependency is unavailable, but still sends a
+ * complete readiness body. That is expected application state, not a transport
+ * failure, so 200 and 503 are both parsed and returned. Any other status, a
+ * malformed body, or a structure that does not match the contract becomes an
+ * `ApiError`.
  */
-export async function getReadiness(): Promise<ReadinessReport> {
-  const response = await fetch(apiUrl("/readyz"), {
-    headers: { Accept: "application/json" },
-  });
-  return (await response.json()) as ReadinessReport;
+export async function getReadiness(
+  options: FetchOptions = {},
+): Promise<ReadinessReport> {
+  const response = await fetchWithTimeout(
+    apiUrl("/readyz"),
+    { headers: { Accept: "application/json" } },
+    options,
+  );
+
+  const requestId = requestIdOf(response);
+
+  if (response.status !== 200 && response.status !== 503) {
+    throw new ApiError(
+      `Readiness check failed (${response.status}).`,
+      response.status,
+      requestId,
+    );
+  }
+
+  const raw = await readBody(response);
+  const report = parseReadinessReport(safeJsonParse(raw));
+  if (!report) {
+    throw new ApiError(
+      "The backend returned an unexpected readiness response.",
+      response.status,
+      requestId,
+    );
+  }
+
+  return report;
 }
 
 /* ------------------------------------------------------------------ */
 /* Streaming run events (Server-Sent Events)                          */
 /* ------------------------------------------------------------------ */
+/* Retained for a later phase. The Phase 1 backend exposes no run API, so       */
+/* nothing in the UI calls this yet.                                           */
 
 export interface StreamHandlers {
   onEvent: (event: RunEvent) => void;
@@ -147,8 +256,9 @@ export function streamRunEvents(
 
       if (!response.ok || !response.body) {
         throw new ApiError(
-          `Failed to open event stream (${response.status})`,
+          `Failed to open event stream (${response.status}).`,
           response.status,
+          response.headers.get(REQUEST_ID_HEADER) ?? undefined,
         );
       }
 
