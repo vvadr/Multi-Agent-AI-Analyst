@@ -1,153 +1,87 @@
-# Running Environments — Development vs Production
+# Running Environments
 
-The project runs in two clearly separated modes. **Development** runs everything
-locally against local data services; **production** uses the connected
-(hosted) services. They use different env files, different secrets, and
-different commands.
+Development and production are isolated. The backend never layers production
+credentials into a development process.
 
-| | Development | Production |
-| --- | --- | --- |
-| Backend `APP_ENV` | `development` | `production` |
-| Backend env file | `backend/.env.development` | `backend/.env.production` (or host dashboard vars) |
-| Backend run | `uvicorn app.main:app --reload` | `uvicorn … --host 0.0.0.0 --port $PORT` (no reload) |
-| Backend `/docs` UI | enabled | disabled |
-| Backend host | localhost:8000 | Render |
-| Database | **local** Postgres (Docker) | Neon (hosted) |
-| Vector store | **local** Qdrant (Docker) | Qdrant Cloud |
-| Object storage | **local** MinIO (Docker) | Supabase Storage |
-| Frontend `NEXT_PUBLIC_APP_ENV` | `development` | `production` |
-| Frontend run | `npm run dev` | `npm run build` + `npm run start` |
-| Frontend env file | `frontend/.env.development` | Vercel dashboard vars |
-| Frontend host | localhost:3000 | Vercel |
-| Secrets live in | `backend/.env.development` (gitignored) | Render/Vercel dashboards |
+| | Development | Test | Production |
+| --- | --- | --- | --- |
+| `APP_ENV` | `development` | `test` | `production` |
+| Dotenv file | `.env.development` | none | `.env.production` or host variables |
+| Data services | Local Docker | mocked/ephemeral | Connected managed services |
+| Backend host | localhost | test process | Render |
+| API docs | enabled | enabled | disabled |
+| Frontend host | localhost | — | Vercel |
 
-## How the backend picks its mode
+## Selection rules
 
-`backend/app/core/config.py` selects the env file at startup:
+`backend/app/core/config.py` applies this order:
 
-1. If `ENV_FILE` is set → use that path (used by Docker/CI).
-2. Else `backend/.env.<APP_ENV>` — e.g. `.env.development` or `.env.production`.
-3. Else fall back to `backend/.env`.
+1. `ENV_FILE`, when explicitly set for CI or a diagnostic run.
+2. `.env.development` when `APP_ENV=development` or no mode is supplied.
+3. No file when `APP_ENV=test`.
+4. `.env.production` when the process environment sets
+   `APP_ENV=production`.
 
-`APP_ENV` comes from the **launch command's** environment, so it chooses the
-mode. On Render there is no file — variables are injected directly and pydantic
-reads them from the environment.
+Process environment variables override dotenv values. Invalid modes fail
+validation. Production also fails startup when required services are missing,
+CORS contains localhost/placeholders, or object storage has no provider region.
+Development fails when a stateful service points at a remote host.
 
-```powershell
-# development is the default:
-uvicorn app.main:app --reload --port 8000
-# force production mode locally:
-$env:APP_ENV = "production"; uvicorn app.main:app --port 8000
-```
-
-## Env file map
+## File map
 
 | File | Committed? | Purpose |
 | --- | --- | --- |
-| `backend/.env.example` | yes | Annotated reference of every variable. |
-| `backend/.env.development.example` | yes | Dev template (local services). |
-| `backend/.env.production.example` | yes | Prod template (connected services). |
-| `backend/.env.development` | **no** | Real dev secrets (local services). |
-| `backend/.env.production` | **no** | Real prod secrets (connected services). |
-| `frontend/.env.development` | yes | Dev defaults (`NEXT_PUBLIC_*`, localhost). |
-| `frontend/.env.production.example` | yes | Prod template. |
-| `frontend/.env.production` | **no** | Real prod values (or set in Vercel). |
+| `backend/.env.development.example` | yes | Complete local-development template |
+| `backend/.env.development` | no | Real development values |
+| `backend/.env.production.example` | yes | Production/Render checklist |
+| `backend/.env.production` | no | Optional local production smoke-test values |
+| `frontend/.env.development` | yes | Browser-safe development defaults |
+| `frontend/.env.production.example` | yes | Vercel checklist |
+| `frontend/.env.production` | no | Optional local production frontend values |
 
----
+## Development
 
-## Development mode (all local)
-
-### Prerequisites
-
-- Python 3.11–3.13, Node 20+, npm.
-- **Docker Desktop** — required to run the local Postgres/Qdrant/MinIO stack.
-  (The backend process still runs on localhost; Docker only provides the data
-  services it talks to.)
-
-### 1. Backend env
+Install Docker Desktop, then:
 
 ```powershell
-cd backend
-python -m venv .venv
-.\.venv\Scripts\Activate.ps1
-python -m pip install --upgrade pip
-python -m pip install -e ".[dev]"
-Copy-Item .env.development.example .env.development
-# In .env.development set the two secrets that have no local equivalent:
-#   GEMINI_API_KEY  and a dev  JWT_SECRET_KEY
-```
-
-Everything else in `.env.development` already points at the local Docker
-services.
-
-### 2. Start the local data services (Docker)
-
-```powershell
-docker compose -f infra/docker-compose.yml up -d postgres qdrant minio createbuckets
-```
-
-- Postgres → `localhost:5432` (analyst/analyst)
-- Qdrant → `localhost:6333`
-- MinIO → `localhost:9000` (console `localhost:9001`, minioadmin/minioadmin)
-
-### 3. Run the backend (hot reload)
-
-```powershell
+Copy-Item backend\.env.development.example backend\.env.development
+# Fill a development JWT secret, Gemini key, and LiteLLM master key.
+docker compose -f infra\docker-compose.yml up -d
 cd backend
 uvicorn app.main:app --reload --port 8000
 ```
 
-`APP_ENV` defaults to `development`, so `.env.development` is used. Check
-`http://localhost:8000/readyz` and `http://localhost:8000/docs`.
+The local services are PostgreSQL, Qdrant, MinIO, and LiteLLM. The API receives
+the LiteLLM token but not the Gemini key; only the proxy receives the provider
+key while the gateway is enabled.
 
-### 4. Run the frontend
+## Test
 
-```powershell
-cd frontend
-npm install
-npm run dev
-```
+`tests/conftest.py` forces `APP_ENV=test` before application import. Tests do not
+load either real dotenv file and mock all external service probes.
 
-`frontend/.env.development` already points at `http://localhost:8000`. Open
-<http://localhost:3000>.
+## Production
 
-### Alternative: full stack in Docker
+Render sets `APP_ENV=production` and injects secrets through the dashboard.
+Production calls Gemini directly; LiteLLM remains a local-development tool.
 
-Runs the backend in a container too (no host uvicorn):
+For a local production smoke test only:
 
 ```powershell
-docker compose -f infra/docker-compose.yml up --build
+Copy-Item backend\.env.production.example backend\.env.production
+$env:APP_ENV = "production"
+cd backend
+alembic upgrade head
+uvicorn app.main:app --host 0.0.0.0 --port 8000
 ```
 
----
+Never copy production values into `.env.development`.
 
-## Production mode
+## Branch mapping
 
-Production is deployed, not run by hand. Backend and frontend deploy
-independently from the same repository.
+- `main` → production.
+- `develop` → preview/staging.
+- Feature branches → pull-request validation.
 
-### Backend (Render)
-
-- Uses `infra/render.yaml` (`APP_ENV=production`, features disabled).
-- Secrets are set as Render **environment variables** — never in Git. See
-  [DEPLOYMENT_RUNBOOK.md](DEPLOYMENT_RUNBOOK.md).
-- Local production-mode smoke test (uses connected services):
-
-  ```powershell
-  cd backend
-  Copy-Item .env.production.example .env.production   # fill connected-service values
-  $env:APP_ENV = "production"
-  uvicorn app.main:app --host 0.0.0.0 --port 8000
-  ```
-
-### Frontend (Vercel)
-
-- Root directory `frontend`; build `npm run build`.
-- Set `NEXT_PUBLIC_API_BASE_URL` (Render URL) and `NEXT_PUBLIC_APP_ENV=production`
-  in Vercel's Production environment variables.
-- Add the Vercel URL to the backend `ALLOWED_ORIGINS` (drop `localhost` in prod).
-
-## Environment ↔ branch mapping
-
-See [BRANCHING.md](BRANCHING.md): `develop` → preview/staging, `main` →
-production.
+See [BRANCHING.md](BRANCHING.md) and
+[DEPLOYMENT_RUNBOOK.md](DEPLOYMENT_RUNBOOK.md).

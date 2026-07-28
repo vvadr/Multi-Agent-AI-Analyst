@@ -7,7 +7,7 @@ Create the following accounts without sharing any credentials in chat:
 1. **Google AI Studio:** create a new server-side Gemini key after revoking the key previously shared in chat.
 2. **Qdrant Cloud:** create a Free cluster; record its HTTPS URL and an API key.
 3. **Hosted PostgreSQL:** create a Free PostgreSQL project. The backend owns the schema and migrations; the provider supplies infrastructure only.
-4. **Render:** connect the personal GitHub repository and create a Web Service from `infra/render.yaml` or the `backend` root directory.
+4. **Render:** connect the private GitHub repository and create a Web Service from `infra/render.yaml` or the `backend` root directory.
 5. **Vercel:** connect the same repository and select the `frontend` directory as its root (Claude's Next.js app).
 6. **Optional:** create Tavily and Langfuse accounts only when web search and tracing are enabled.
 
@@ -33,6 +33,7 @@ ALLOWED_ORIGINS
 ```
 
 Set `APP_ENV=production`, `ENABLE_WEB_SEARCH=false`, and `ENABLE_CODE_EXECUTION=false` for the first release.
+Do not set `LITELLM_BASE_URL`; production calls Gemini directly.
 
 ## Vercel environment variables (frontend)
 
@@ -53,10 +54,13 @@ remove `localhost` from the production value.
 Do not expose the pilot publicly until all of these are true:
 
 - `GET /healthz` is successful from the Render URL.
-- `GET /readyz` reports all required integrations as configured.
+- `alembic upgrade head` completes against the application database.
+- `GET /readyz` reports every required integration as configured and reachable.
 - The database uses a non-owner, application-specific role in production.
 - Qdrant and database credentials are server-only.
 - The deployed `ALLOWED_ORIGINS` contains the Vercel frontend URL only.
-- No API key or `.env` file appears in `git log --all -- .env backend/.env`.
+- Gitleaks passes against the complete Git history.
+- No API key or real env file appears in
+  `git log --all -- backend/.env.development backend/.env.production`.
 
 Free infrastructure is appropriate for a portfolio/pilot deployment, but not an uptime or backup guarantee. Upgrade managed services before storing sensitive data or promising availability.

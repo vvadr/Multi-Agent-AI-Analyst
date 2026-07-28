@@ -4,7 +4,7 @@ services:
     runtime: python
     rootDir: backend
     buildCommand: python -m pip install --upgrade pip && python -m pip install .
-    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    startCommand: alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port $PORT
     healthCheckPath: /healthz
     envVars:
       - key: APP_ENV
@@ -13,6 +13,36 @@ services:
         value: INFO
       - key: API_V1_PREFIX
         value: /v1
+      - key: ALLOWED_ORIGINS
+        sync: false
+      - key: JWT_SECRET_KEY
+        sync: false
+      - key: DATABASE_URL
+        sync: false
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: GEMINI_MODEL
+        value: gemini-3.1-flash-lite
+      - key: GEMINI_EMBEDDING_MODEL
+        value: gemini-embedding-001
+      - key: QDRANT_URL
+        sync: false
+      - key: QDRANT_API_KEY
+        sync: false
+      - key: QDRANT_COLLECTION
+        value: analyst_documents
+      - key: OBJECT_STORAGE_BUCKET
+        value: analyst-documents
+      - key: OBJECT_STORAGE_ENDPOINT
+        sync: false
+      - key: OBJECT_STORAGE_REGION
+        sync: false
+      - key: OBJECT_STORAGE_ACCESS_KEY_ID
+        sync: false
+      - key: OBJECT_STORAGE_SECRET_ACCESS_KEY
+        sync: false
+      - key: SERVICE_PROBE_TIMEOUT_SECONDS
+        value: "3"
       - key: ENABLE_WEB_SEARCH
         value: "false"
       - key: ENABLE_CODE_EXECUTION

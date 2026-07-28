@@ -6,20 +6,55 @@ on:
   pull_request:
     paths:
       - "backend/**"
+      - "infra/**"
       - ".github/workflows/backend-ci.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: backend-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   test:
+    name: Backend quality
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: backend
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - name: Check out repository
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Set up Python
+        uses: actions/setup-python@42375524e23c412d93fb67b49958b491fce71c38 # v5.4.0
         with:
           python-version: "3.13"
-      - run: python -m pip install --upgrade pip
-      - run: python -m pip install -e ".[dev]"
-      - run: ruff check .
-      - run: pytest
+          cache: pip
+          cache-dependency-path: backend/pyproject.toml
+
+      - name: Install backend
+        working-directory: backend
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev]"
+
+      - name: Lint
+        working-directory: backend
+        run: ruff check .
+
+      - name: Test with coverage
+        working-directory: backend
+        env:
+          APP_ENV: test
+        run: pytest --cov=app --cov-report=term-missing --cov-fail-under=80
+
+      - name: Audit Python dependencies
+        working-directory: backend
+        run: pip-audit
+
+      - name: Validate Compose configuration
+        run: |
+          cp backend/.env.development.example backend/.env.development
+          docker compose -f infra/docker-compose.yml config --quiet
+
+      - name: Build backend container
+        run: docker build -t multi-agent-analyst-api:ci backend
