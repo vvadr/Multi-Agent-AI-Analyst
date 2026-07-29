@@ -1,0 +1,10 @@
+Northstar Analytics — Synthetic 2025 Sustainability Brief
+
+Northstar's 2025 sustainability priorities were reducing energy intensity,
+increasing recycled-material sourcing, and publishing quarterly emissions
+progress reports. The company funded supplier audits and required all new
+facilities to include efficiency targets.
+
+The synthetic analytics dataset tracks monthly revenue, active customers, and
+region. It is for local development only and does not represent a real company
+or person.

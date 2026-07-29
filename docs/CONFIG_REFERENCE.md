@@ -13,6 +13,11 @@ are server-only and ignored by Git. Frontend `NEXT_PUBLIC_*` values are public.
 | `LOG_LEVEL` | `INFO` | Backend logging threshold |
 | `ALLOWED_ORIGINS` | `http://localhost:3000` | Comma-separated CORS allow-list |
 | `SERVICE_PROBE_TIMEOUT_SECONDS` | `3` | Per-service readiness timeout |
+| `MAX_AGENT_REVISIONS` | `1` | Maximum critic-requested graph revisions |
+| `ENABLE_UNAUTHENTICATED_DEMO_API` | `false` | Development-only local demo API; production rejects `true` |
+| `DEMO_TENANT_ID` | `demo` | Server-owned tenant used by the local demo |
+| `DEMO_MAX_UPLOAD_BYTES` | `10000000` | Maximum supported-document upload size for the local demo (10 MB) |
+| `DEMO_MAX_CONCURRENT_RUNS` | `1` | Process-local local-demo run concurrency |
 
 Production requires HTTPS origins and rejects localhost and template
 placeholders.

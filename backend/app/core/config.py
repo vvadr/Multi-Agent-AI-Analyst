@@ -4,7 +4,7 @@ from pathlib import Path
 from typing import Literal
 from urllib.parse import urlparse
 
-from pydantic import SecretStr, model_validator
+from pydantic import Field, SecretStr, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 BACKEND_DIRECTORY = Path(__file__).resolve().parents[2]
@@ -74,10 +74,12 @@ class Settings(BaseSettings):
     refresh_token_expire_days: int = 7
 
     database_url: SecretStr | None = None
+    analytics_database_url: SecretStr | None = None
 
     gemini_api_key: SecretStr | None = None
     gemini_model: str = "gemini-3.1-flash-lite"
     gemini_embedding_model: str = "gemini-embedding-001"
+    embedding_dimensions: int = Field(default=768, ge=1)
 
     # Optional OpenAI-compatible gateway used only in local development.
     litellm_base_url: str | None = None
@@ -111,11 +113,17 @@ class Settings(BaseSettings):
     max_agent_steps: int = 8
     max_tool_calls: int = 5
     run_timeout_seconds: int = 60
+    max_agent_revisions: int = Field(default=1, ge=0, le=3)
     max_result_rows: int = 100
     sql_statement_timeout_ms: int = 5000
     service_probe_timeout_seconds: float = 3.0
     enable_web_search: bool = False
+    enable_sql_agent: bool = False
     enable_code_execution: bool = False
+    enable_unauthenticated_demo_api: bool = False
+    demo_tenant_id: str = "demo"
+    demo_max_upload_bytes: int = Field(default=10_000_000, ge=1, le=10_000_000)
+    demo_max_concurrent_runs: int = Field(default=1, ge=1, le=4)
     redis_url: SecretStr | None = None
 
     @property
@@ -210,6 +218,10 @@ class Settings(BaseSettings):
 
         if self.object_storage_region == "auto":
             raise ValueError("production OBJECT_STORAGE_REGION must be provider-specific")
+        if self.enable_sql_agent and not _secret_value(self.analytics_database_url):
+            raise ValueError("production ANALYTICS_DATABASE_URL is required when SQL is enabled")
+        if self.enable_unauthenticated_demo_api:
+            raise ValueError("production must not enable the unauthenticated demo API")
         return self
 
 
