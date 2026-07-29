@@ -1,0 +1,44 @@
+# LiteLLM model gateway — OpenAI-compatible front end for Gemini.
+#
+# Why it exists: the backend calls one endpoint with one token instead of
+# talking to Google directly, so GEMINI_API_KEY lives in exactly one process
+# and swapping models is a config change rather than a code change.
+#
+# Stateless by design: no `database_url` is set, so LiteLLM creates no tables
+# and keeps no state. That means no spend tracking, no virtual keys, and no
+# admin UI — add a dedicated Postgres DSN under general_settings.database_url
+# if you later need those.
+#
+# `os.environ/NAME` reads NAME from the proxy process environment. In Docker
+# those values come only from backend/.env.development.
+#
+# Run locally:
+#   docker compose -f infra/docker-compose.yml up -d litellm
+#   curl http://localhost:4000/health/liveliness
+
+model_list:
+  # Stable application alias. Keep callers unchanged when the provider model
+  # is upgraded deliberately.
+  - model_name: flash-lite
+    litellm_params:
+      model: gemini/gemini-3.1-flash-lite
+      api_key: os.environ/GEMINI_API_KEY
+
+  # Embeddings -> RAG retrieval. Must stay in sync with GEMINI_EMBEDDING_MODEL.
+  # Don't change after indexing — vectors from different models aren't
+  # comparable and you'd have to re-index everything.
+  - model_name: gemini-embedding
+    litellm_params:
+      model: gemini/gemini-embedding-001
+      api_key: os.environ/GEMINI_API_KEY
+
+litellm_settings:
+  # Silently drop provider-unsupported params instead of erroring. Keeps
+  # OpenAI-shaped requests working against Gemini.
+  drop_params: true
+  set_verbose: false
+
+general_settings:
+  # The token callers present to the proxy (Authorization: Bearer sk-...).
+  # This is a LiteLLM key, NOT the Google API key — see docs/KEY_SETUP_GUIDE.md.
+  master_key: os.environ/LITELLM_MASTER_KEY

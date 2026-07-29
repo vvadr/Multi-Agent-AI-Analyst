@@ -17,9 +17,9 @@ python -m pip install -e ".[dev]"
 Copy-Item .env.development.example .env.development
 ```
 
-`APP_ENV` defaults to `development`, so the backend loads `.env.development`.
-That file already targets the local Docker services; set the two secrets with no
-local equivalent in `backend/.env.development`:
+`APP_ENV` defaults to `development`, so the backend loads only
+`.env.development`. That file targets the local Docker services; set the two
+secrets with no local equivalent:
 
 ```env
 GEMINI_API_KEY=your-key
@@ -39,7 +39,9 @@ ruff check .
 ```
 
 - `GET http://localhost:8000/healthz` confirms the API process is alive.
-- `GET http://localhost:8000/readyz` reports whether database, Gemini, and Qdrant configuration values exist. It never returns credentials.
+- `GET http://localhost:8000/readyz` probes PostgreSQL, the active model
+  provider, Qdrant, and object storage. It never returns endpoints,
+  credentials, or provider error bodies.
 - `GET http://localhost:8000/docs` exposes the development OpenAPI interface.
 
 ## Local infrastructure (Docker)
@@ -48,7 +50,7 @@ Development mode runs against local Postgres, Qdrant, and MinIO. After Docker
 Desktop is installed and running, start the data services:
 
 ```powershell
-docker compose -f ..\infra\docker-compose.yml up -d postgres qdrant minio createbuckets
+docker compose -f ..\infra\docker-compose.yml up -d postgres qdrant minio createbuckets litellm
 ```
 
 Then run the backend on the host (hot reload) as above. To run the whole stack

@@ -7,8 +7,9 @@ backend/.env
 backend/.env.development
 backend/.env.production
 frontend/.env.production
-# Non-secret, committed templates and framework env files are allowed:
-#   backend/.env.example, frontend/.env.example,
+infra/litellm/litellm.env
+# Non-secret committed templates and browser-safe frontend defaults are allowed:
+#   backend/.env.development.example, backend/.env.production.example,
 #   frontend/.env.development, frontend/.env.production.example
 *.pem
 *.key
@@ -29,6 +30,7 @@ node_modules/
 .next/
 dist/
 coverage/
+.coverage
 
 # Local data and generated artifacts
 data/source_docs/

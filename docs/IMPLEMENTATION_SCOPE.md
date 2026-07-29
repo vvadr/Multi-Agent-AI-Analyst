@@ -64,7 +64,6 @@ multi-agent-ai-analyst/
 │   ├── API_CONTRACT.md
 │   ├── DEPLOYMENT_RUNBOOK.md
 │   └── SECURITY_MODEL.md
-├── .env.example
 └── README.md
 ```
 
@@ -169,4 +168,4 @@ The project owner provides:
 4. Confirmation of the chosen free-service accounts: Gemini, Qdrant, database provider, Render, and Vercel.
 5. A decision on login policy: email/password for the pilot, or invite-only accounts.
 
-The project owner must not provide API keys, passwords, access tokens, or database credentials in chat. Secret values are entered directly into local `.env` files and service dashboards after the backend provides an `.env.example` file.
+The project owner must not provide API keys, passwords, access tokens, or database credentials in chat. Secret values are entered directly into the isolated, gitignored mode files (`backend/.env.development` or `backend/.env.production`) and service dashboards, using the matching committed `.example` template as the starting point. Development and production files are never layered.

@@ -14,13 +14,15 @@ the backend API.
 
 ## Current foundation
 
-- FastAPI service with versioned API routing and health/readiness endpoints.
+- FastAPI service with versioned routing, process liveness, and dependency
+  readiness probes.
 - Next.js (App Router, TypeScript, Tailwind) frontend with a typed API client
   and a live backend-status panel.
-- Typed, server-only environment configuration.
+- Strictly isolated `development` / `test` / `production` configuration: each
+  mode loads exactly one env file (never layered), development refuses remote
+  service endpoints, and production refuses to start on an incomplete config.
 - Dependency management, tests, linting, Docker, GitHub Actions, and a Render
   deployment template.
-- Complete secret templates in `backend/.env.example` and `frontend/.env.example`.
 
 ## Start the backend locally
 
@@ -37,8 +39,9 @@ uvicorn app.main:app --reload --port 8000
 
 Then open `http://localhost:8000/docs` and `http://localhost:8000/healthz`.
 
-Development mode runs against local Docker services (Postgres, Qdrant, MinIO);
-production mode uses the connected services. `APP_ENV` selects the mode — see
+Development mode runs against local Docker services (Postgres, Qdrant, MinIO,
+and optional LiteLLM); production uses connected services. `APP_ENV` selects
+exactly one environment file — see
 [Running environments](docs/ENVIRONMENTS.md).
 
 ## Start the frontend locally

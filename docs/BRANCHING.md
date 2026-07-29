@@ -66,8 +66,11 @@ without admin rights, so do them in the GitHub UI:
 
 For `main` **and** `develop`:
 
-- Require a pull request before merging (≥1 approval).
-- Require status checks to pass: `Backend CI`, `Frontend CI`.
+- Require a pull request before merging. For the solo pilot, require zero
+  approvals but all status checks; switch to at least one approval when a
+  second human collaborator joins.
+- Require status checks to pass: `Backend quality`, `build`, and
+  `Full-history secret scan`.
 - Require branches to be up to date before merging.
 - Do not allow direct pushes / force pushes.
 - Include administrators.

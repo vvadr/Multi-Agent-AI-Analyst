@@ -1,69 +1,48 @@
-# Environment Keys — What You Need to Get
+# Environment Keys
 
-> Looking for **step-by-step, click-by-click** instructions to grab each key
-> (including Supabase Storage)? See **[KEY_SETUP_GUIDE.md](KEY_SETUP_GUIDE.md)**.
-> This page is the quick reference; that one is the walkthrough.
+All secrets are backend-only. The frontend receives only the backend URL and
+other browser-safe `NEXT_PUBLIC_*` settings.
 
-This is the checklist of keys/credentials to obtain. **All secrets are
-backend-only.** The frontend has no secrets — it only needs the backend's URL.
+## Development
 
-Rules that never change:
+Copy `backend/.env.development.example` to the ignored
+`backend/.env.development`. Local PostgreSQL, Qdrant, and MinIO credentials are
+already represented in the template. Supply:
 
-- Never put a secret in the frontend (`NEXT_PUBLIC_*` is public).
-- Never commit a real secret. They live in `backend/.env` locally and in the
-  Render/Vercel dashboards in production.
-- Never paste keys into chat, screenshots, or issue trackers.
+| Value | Source |
+| --- | --- |
+| `JWT_SECRET_KEY` | Generate a development-only random value |
+| `GEMINI_API_KEY` | Google AI Studio |
+| `LITELLM_MASTER_KEY` | Generate a development-only `sk-...` token |
 
-## Minimum to start (local development)
+## Production
 
-You can boot the whole app locally with just these two:
+Use `backend/.env.production.example` as the Render dashboard checklist:
 
-| Key | How to get it | Notes |
-| --- | --- | --- |
-| `JWT_SECRET_KEY` | Generate it yourself — not from a provider | Run `python -c "import secrets; print(secrets.token_urlsafe(48))"` |
-| `GEMINI_API_KEY` | [Google AI Studio](https://aistudio.google.com/app/apikey) → create API key | Required for agent answers and embeddings |
+| Values | Provider |
+| --- | --- |
+| `JWT_SECRET_KEY` | Generate a production-only random value |
+| `DATABASE_URL` | Neon or another hosted PostgreSQL provider |
+| `GEMINI_API_KEY` | Google AI Studio |
+| `QDRANT_URL`, `QDRANT_API_KEY` | Qdrant Cloud |
+| `OBJECT_STORAGE_*` | Supabase Storage or another S3-compatible provider |
 
-Put them in `backend/.env`. That's enough for the API to start and for the
-frontend status panel to show Gemini as "configured".
-
-## Add as you enable features
-
-| Key(s) | Get from | Needed when |
-| --- | --- | --- |
-| `DATABASE_URL` | A hosted Postgres provider — [Supabase](https://supabase.com), [Neon](https://neon.tech), etc. Or local Docker for dev. | Accounts, conversations, runs, audit — any DB feature |
-| `QDRANT_URL`, `QDRANT_API_KEY` | [Qdrant Cloud](https://cloud.qdrant.io) → create a Free cluster | Document retrieval / vector search |
-| `OBJECT_STORAGE_ENDPOINT`, `OBJECT_STORAGE_ACCESS_KEY_ID`, `OBJECT_STORAGE_SECRET_ACCESS_KEY`, `OBJECT_STORAGE_BUCKET`, `OBJECT_STORAGE_REGION` | An S3-compatible store — [Cloudflare R2](https://developers.cloudflare.com/r2/), Supabase Storage, Backblaze B2 | Persistent document uploads |
+Production does not deploy LiteLLM, so `LITELLM_BASE_URL` stays blank.
 
 ## Optional
 
-| Key(s) | Get from | Needed when |
-| --- | --- | --- |
-| `TAVILY_API_KEY` | [Tavily](https://tavily.com) | Web search is enabled (`ENABLE_WEB_SEARCH=true`) |
-| `LANGFUSE_PUBLIC_KEY`, `LANGFUSE_SECRET_KEY` | [Langfuse Cloud](https://cloud.langfuse.com) | Tracing/observability |
-| `REDIS_URL` | Any hosted Redis (e.g. Upstash) | A persistent async job queue is added |
+- `TAVILY_API_KEY` is needed only after safe web search is implemented.
+- `LANGFUSE_*` is needed only when redacted tracing is enabled.
+- `REDIS_URL` is needed when the durable async worker is implemented.
 
-## Non-secret config
+## Rules
 
-These are settings, not secrets — safe to commit as defaults. **Every one is
-documented (purpose, default, dev vs prod) in
-[CONFIG_REFERENCE.md](CONFIG_REFERENCE.md).**
+- Never copy production credentials into `.env.development`.
+- Never commit `.env.development`, `.env.production`, or a secret in another
+  file.
+- Never paste secrets into chat, issues, screenshots, or `NEXT_PUBLIC_*`.
+- If a secret reaches Git history, rotate it immediately; deleting the latest
+  copy does not invalidate the credential or erase history.
 
-| Variable | Where | Default |
-| --- | --- | --- |
-| `NEXT_PUBLIC_API_BASE_URL` | frontend | `http://localhost:8000` (dev); Render URL (prod) |
-| `NEXT_PUBLIC_API_V1_PREFIX` | frontend | `/v1` |
-| `NEXT_PUBLIC_APP_ENV` | frontend | `development` / `production` |
-| `APP_ENV`, `LOG_LEVEL`, `API_V1_PREFIX`, `ALLOWED_ORIGINS`, `GEMINI_MODEL`, `GEMINI_EMBEDDING_MODEL`, `QDRANT_COLLECTION`, agent budgets, feature flags | backend | See [CONFIG_REFERENCE.md](CONFIG_REFERENCE.md) |
-
-## Where each key goes
-
-| Environment | Location |
-| --- | --- |
-| Local backend | `backend/.env` (gitignored; copy from `backend/.env.example`) |
-| Local frontend | `frontend/.env.development` (defaults) or `frontend/.env.local` (overrides) |
-| Production backend | Render → Service → Environment |
-| Production frontend | Vercel → Project → Settings → Environment Variables (Production) |
-
-The full backend variable reference lives in
-[`../backend/.env.example`](../backend/.env.example); the deployment steps are in
-[DEPLOYMENT_RUNBOOK.md](DEPLOYMENT_RUNBOOK.md).
+See [KEY_SETUP_GUIDE.md](KEY_SETUP_GUIDE.md) for provider steps and
+[CONFIG_REFERENCE.md](CONFIG_REFERENCE.md) for every setting.
