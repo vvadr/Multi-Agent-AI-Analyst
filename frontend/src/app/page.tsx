@@ -1,18 +1,30 @@
+import { AnalystWorkspace } from "@/components/analyst-workspace";
 import { BackendStatus } from "@/components/backend-status";
+import { DocumentUpload } from "@/components/document-upload";
 
 export default function Home() {
   return (
     <div className="flex min-h-screen flex-col items-center p-8 font-sans sm:p-20">
-      <main className="flex w-full max-w-2xl flex-col items-center gap-10 text-center">
-        <div className="space-y-3">
+      <main className="flex w-full max-w-2xl flex-col items-center gap-8">
+        <div className="space-y-3 text-center">
           <h1 className="text-2xl font-semibold sm:text-3xl">
             Multi-Agent AI Analyst
           </h1>
           <p className="text-sm text-black/60 dark:text-white/60">
-            Phase 1 system foundation. This client talks only to the backend API
-            — it never holds provider, database, or model secrets.
+            Upload a document, ask a question, and watch the specialist agents
+            work. Retrieval, web research, and analytics all run on the backend;
+            this client talks only to its API and never holds provider,
+            database, or model secrets.
+          </p>
+          <p className="text-sm text-black/60 dark:text-white/60">
+            A local, unauthenticated demo: one shared workspace, and nothing is
+            kept once the backend restarts.
           </p>
         </div>
+
+        <DocumentUpload />
+
+        <AnalystWorkspace />
 
         <BackendStatus />
 

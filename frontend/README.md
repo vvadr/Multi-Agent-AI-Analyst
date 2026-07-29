@@ -109,16 +109,23 @@ frontend/
 ├── src/
 │   ├── app/                      # App Router routes, layout, global styles
 │   │   ├── layout.tsx
-│   │   └── page.tsx              # Landing page + live backend status
+│   │   ├── page.tsx              # Analyst workspace + live backend status
+│   │   └── page.test.tsx
 │   ├── components/
+│   │   ├── analyst-workspace.tsx # Question form, SSE progress, answer
 │   │   ├── backend-status.tsx
-│   │   └── backend-status.test.tsx
+│   │   ├── citation-list.tsx     # Document / web / analytics sources
+│   │   ├── document-upload.tsx   # .txt validation, progress, indexed state
+│   │   └── *.test.tsx
 │   └── lib/
 │       ├── api.ts                # Typed API client — the only network layer
 │       ├── config.ts             # Public runtime config + validation
+│       ├── documents.ts          # Upload rules + POST /v1/documents contract
+│       ├── parse.ts              # Shared defensive field readers
 │       ├── readiness.ts          # /readyz contract, parser, status mapping
-│       ├── config.test.ts
-│       └── readiness.test.ts
+│       ├── runs.ts               # Run contract, citations, progress labels
+│       ├── sse.ts                # Server-Sent Events framing
+│       └── *.test.ts
 ├── public/
 ├── vitest.config.ts
 ├── vitest.setup.ts
@@ -133,8 +140,41 @@ Gemini, or object storage directly. All requests go through `src/lib/api.ts`,
 which mirrors the endpoints documented in
 [`../docs/IMPLEMENTATION_SCOPE.md`](../docs/IMPLEMENTATION_SCOPE.md).
 
-The SSE run-event client in `src/lib/api.ts` is retained for a later phase. The
-Phase 1 backend exposes no run API, so no UI calls it yet.
+## Analyst workspace
+
+The page drives the backend's **development-only, unauthenticated demo API**,
+which the backend serves only when `APP_ENV=development` and
+`ENABLE_UNAUTHENTICATED_DEMO_API=true`. Against any other backend those routes
+return 404 and the UI reports that the demo API is not being served.
+
+| Call | Used for |
+| --- | --- |
+| `POST /v1/documents` | Multipart `.txt` upload. Indexing is **synchronous**: a 201 means the file is already chunked, embedded, and searchable, so there is nothing to poll. |
+| `POST /v1/runs` | Starts a run; returns 202 with the run id. |
+| `GET /v1/runs/{id}/events` | Typed SSE progress: `run_started`, `routing`, `retrieving`, `querying`, `generating`, `completed`, `failed`. |
+| `GET /v1/runs/{id}` | Final status, grounded answer, and citations. |
+
+Three rules keep model- and provider-controlled text out of the page:
+
+- **Progress copy is keyed by event type alone.** The API client discards SSE
+  event payloads entirely (`routing` carries the chosen route, `retrieving`
+  carries the source), so no internal trace can reach the DOM. Unknown event
+  names are ignored rather than rendered.
+- **Failures use fixed local copy.** `GET /v1/runs/{id}` returns an `error`
+  string; the parser deliberately does not read it. The same applies to HTTP
+  `detail` bodies — each operation maps the status onto its own message and
+  keeps only the `X-Request-ID`.
+- **Citation URLs are checked before they become links.** Anything that is not
+  `http(s)` is dropped during parsing and re-checked at render time, so a
+  `javascript:` source cannot produce an anchor. Web citations are labelled as
+  external and open with `rel="noopener noreferrer"`.
+
+Client-side upload validation (`.txt`, non-empty, ≤ 1 MB) is a convenience, not
+a control: the backend re-checks extension, size, encoding, and emptiness, and
+the limit here tracks its `DEMO_MAX_UPLOAD_BYTES` default.
+
+Cancelling a run stops the client following it; the run may still finish on the
+server, and the UI says so rather than claiming it was aborted.
 
 > Note: `npm audit` reports advisories in dev-only tooling (Next/ESLint/PostCSS
 > transitive deps). Their only offered "fixes" are breaking downgrades of Next

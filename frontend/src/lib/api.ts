@@ -6,44 +6,66 @@
  * docs/IMPLEMENTATION_SCOPE.md); the frontend never calls Postgres, Qdrant,
  * Gemini, or storage directly.
  *
- * Errors surfaced from here are deliberately generic. Backend exception text
- * and provider error details never reach the UI — only a short, safe message
- * plus the `X-Request-ID` for log correlation.
+ * Errors surfaced from here are deliberately generic. Backend `detail` text and
+ * provider error strings are never propagated — each operation maps the HTTP
+ * status onto fixed local copy and keeps the `X-Request-ID` for log
+ * correlation. Response bodies are validated by the parsers in `runs.ts` and
+ * `documents.ts` before any caller sees them.
  */
 
 import { apiUrl, apiV1Url } from "./config";
+import {
+  parseUploadedDocument,
+  type UploadedDocument,
+} from "./documents";
 import { parseReadinessReport, type ReadinessReport } from "./readiness";
+import {
+  isRunEventType,
+  parseRunCreated,
+  parseRunDetail,
+  type RunCreated,
+  type RunDetail,
+  type RunEventType,
+} from "./runs";
+import { parseSseBuffer } from "./sse";
 
 export type {
   ComponentReadiness,
   ReadinessComponent,
   ReadinessReport,
 } from "./readiness";
+export type { Citation, RunDetail, RunEventType, RunStatus } from "./runs";
+export type { UploadedDocument } from "./documents";
 
 /** Shape returned by `GET /healthz`. */
 export interface HealthStatus {
   status: "ok";
 }
 
-/** Typed SSE progress events emitted by `GET /v1/runs/{id}/events`. */
-export type RunEventType =
-  | "run_started"
-  | "routing"
-  | "retrieving"
-  | "querying"
-  | "generating"
-  | "completed"
-  | "failed";
-
+/**
+ * A progress event from `GET /v1/runs/{id}/events`.
+ *
+ * The payload is intentionally dropped at this boundary. Backend events carry
+ * internal routing decisions and source hints; discarding them here makes it
+ * structurally impossible for that text to reach the UI.
+ */
 export interface RunEvent {
   type: RunEventType;
-  data?: unknown;
 }
 
 const REQUEST_ID_HEADER = "X-Request-ID";
 
 /** Default ceiling for a single request, so the UI can never hang forever. */
 export const DEFAULT_TIMEOUT_MS = 8000;
+
+/** Uploads index synchronously (chunk + embed + store), so they get longer. */
+export const UPLOAD_TIMEOUT_MS = 60_000;
+
+const UNREACHABLE_MESSAGE = "Cannot reach the backend API.";
+
+/** Shown when the demo API is disabled or the run has expired from memory. */
+const DEMO_DISABLED_MESSAGE =
+  "This backend is not serving the local demo API.";
 
 export class ApiError extends Error {
   /**
@@ -71,6 +93,28 @@ function safeJsonParse(raw: string): unknown {
   } catch {
     return undefined;
   }
+}
+
+/**
+ * Re-throw an `ApiError` with copy chosen for this operation.
+ *
+ * Status 0 already carries a safe transport message, so it passes through; the
+ * request id is always preserved.
+ */
+function mapApiError(
+  error: unknown,
+  messages: Readonly<Record<number, string>>,
+  fallback: string,
+): never {
+  if (!(error instanceof ApiError)) {
+    throw new ApiError(fallback, 0);
+  }
+  if (error.status === 0) throw error;
+  throw new ApiError(
+    messages[error.status] ?? fallback,
+    error.status,
+    error.requestId,
+  );
 }
 
 interface FetchOptions {
@@ -116,7 +160,7 @@ async function fetchWithTimeout(
     return await fetch(url, { ...init, signal: controller.signal });
   } catch {
     // Deliberately opaque: DNS, CORS, and TLS failures must not leak detail.
-    throw new ApiError("Cannot reach the backend API.", 0);
+    throw new ApiError(UNREACHABLE_MESSAGE, 0);
   } finally {
     clearTimeout(timer);
     signal?.removeEventListener("abort", onExternalAbort);
@@ -124,14 +168,24 @@ async function fetchWithTimeout(
 }
 
 interface RequestOptions extends FetchOptions {
-  /** Short-lived bearer access token from `POST /v1/auth/login`. */
+  /** Short-lived bearer access token, once the API requires one. */
   token?: string;
   /** JSON request body; serialized automatically. */
   json?: unknown;
   method?: string;
 }
 
-async function request<T>(url: string, options: RequestOptions = {}): Promise<T> {
+interface JsonResponse {
+  parsed: unknown;
+  status: number;
+  requestId?: string;
+}
+
+/** Perform a JSON request and return the envelope, so callers keep the status. */
+async function sendJson(
+  url: string,
+  options: RequestOptions = {},
+): Promise<JsonResponse> {
   const { token, json, method, signal, timeoutMs } = options;
 
   const headers = new Headers({ Accept: "application/json" });
@@ -150,22 +204,28 @@ async function request<T>(url: string, options: RequestOptions = {}): Promise<T>
 
   const raw = await readBody(response);
   const parsed = raw ? safeJsonParse(raw) : undefined;
+  const requestId = requestIdOf(response);
 
   if (!response.ok) {
     throw new ApiError(
       `Request failed (${response.status}).`,
       response.status,
-      requestIdOf(response),
+      requestId,
     );
   }
   if (parsed === undefined) {
     throw new ApiError(
       "The backend returned an unreadable response.",
       response.status,
-      requestIdOf(response),
+      requestId,
     );
   }
 
+  return { parsed, status: response.status, requestId };
+}
+
+async function request<T>(url: string, options: RequestOptions = {}): Promise<T> {
+  const { parsed } = await sendJson(url, options);
   return parsed as T;
 }
 
@@ -218,45 +278,213 @@ export async function getReadiness(
   return report;
 }
 
+const CREATE_RUN_MESSAGES: Readonly<Record<number, string>> = {
+  404: DEMO_DISABLED_MESSAGE,
+  422: "That question could not be accepted. Try rephrasing it.",
+  429: "The demo is already running an analysis. Try again in a moment.",
+  503: "The analyst services are unavailable right now.",
+};
+
+/** `POST /v1/runs` — accepted with 202 while the run executes in the background. */
+export async function createRun(
+  question: string,
+  options: FetchOptions = {},
+): Promise<RunCreated> {
+  let envelope: JsonResponse;
+  try {
+    envelope = await sendJson(apiV1Url("/runs"), {
+      method: "POST",
+      json: { question },
+      ...options,
+    });
+  } catch (error) {
+    return mapApiError(error, CREATE_RUN_MESSAGES, "The run could not be started.");
+  }
+
+  const run = parseRunCreated(envelope.parsed);
+  if (!run) {
+    throw new ApiError(
+      "The backend returned an unexpected run response.",
+      envelope.status,
+      envelope.requestId,
+    );
+  }
+  return run;
+}
+
+const GET_RUN_MESSAGES: Readonly<Record<number, string>> = {
+  404: "That run is no longer available.",
+  422: "That run reference is not valid.",
+};
+
+/** `GET /v1/runs/{id}` — status, and the answer plus citations once complete. */
+export async function getRun(
+  runId: string,
+  options: FetchOptions = {},
+): Promise<RunDetail> {
+  let envelope: JsonResponse;
+  try {
+    envelope = await sendJson(
+      apiV1Url(`/runs/${encodeURIComponent(runId)}`),
+      options,
+    );
+  } catch (error) {
+    return mapApiError(error, GET_RUN_MESSAGES, "The run could not be loaded.");
+  }
+
+  const detail = parseRunDetail(envelope.parsed);
+  if (!detail) {
+    throw new ApiError(
+      "The backend returned an unexpected run response.",
+      envelope.status,
+      envelope.requestId,
+    );
+  }
+  return detail;
+}
+
+const UPLOAD_MESSAGES: Readonly<Record<number, string>> = {
+  404: DEMO_DISABLED_MESSAGE,
+  413: "That file is larger than the upload limit.",
+  415: "Only .txt files are supported.",
+  422: "That file must be non-empty UTF-8 text.",
+  503: "Document services are unavailable right now.",
+};
+
+export interface UploadOptions {
+  /** Fraction of bytes sent, 0–1. Only fires while the request body uploads. */
+  onProgress?: (fraction: number) => void;
+  signal?: AbortSignal;
+  timeoutMs?: number;
+}
+
+/**
+ * `POST /v1/documents` — multipart upload of one `.txt` file.
+ *
+ * Uses `XMLHttpRequest` rather than `fetch`: only XHR reports request-body
+ * upload progress, which the UI needs. A 201 means indexing already finished,
+ * so there is no status to poll afterwards.
+ */
+export function uploadDocument(
+  file: File,
+  { onProgress, signal, timeoutMs = UPLOAD_TIMEOUT_MS }: UploadOptions = {},
+): Promise<UploadedDocument> {
+  return new Promise<UploadedDocument>((resolve, reject) => {
+    if (signal?.aborted) {
+      reject(new ApiError("The upload was cancelled.", 0));
+      return;
+    }
+
+    const body = new FormData();
+    body.append("file", file, file.name);
+
+    const xhr = new XMLHttpRequest();
+    const onAbort = () => xhr.abort();
+    const cleanup = () => signal?.removeEventListener("abort", onAbort);
+
+    xhr.open("POST", apiV1Url("/documents"));
+    xhr.timeout = timeoutMs;
+    xhr.setRequestHeader("Accept", "application/json");
+
+    if (onProgress) {
+      xhr.upload?.addEventListener("progress", (event: ProgressEvent) => {
+        if (event.lengthComputable && event.total > 0) {
+          onProgress(Math.min(1, event.loaded / event.total));
+        }
+      });
+    }
+
+    xhr.addEventListener("load", () => {
+      cleanup();
+      const requestId =
+        xhr.getResponseHeader(REQUEST_ID_HEADER) ?? undefined;
+
+      if (xhr.status < 200 || xhr.status >= 300) {
+        reject(
+          new ApiError(
+            UPLOAD_MESSAGES[xhr.status] ?? "The upload failed.",
+            xhr.status,
+            requestId,
+          ),
+        );
+        return;
+      }
+
+      const document = parseUploadedDocument(safeJsonParse(xhr.responseText));
+      if (!document) {
+        reject(
+          new ApiError(
+            "The backend returned an unexpected upload response.",
+            xhr.status,
+            requestId,
+          ),
+        );
+        return;
+      }
+      resolve(document);
+    });
+
+    xhr.addEventListener("error", () => {
+      cleanup();
+      reject(new ApiError(UNREACHABLE_MESSAGE, 0));
+    });
+    xhr.addEventListener("timeout", () => {
+      cleanup();
+      reject(new ApiError("The upload timed out.", 0));
+    });
+    xhr.addEventListener("abort", () => {
+      cleanup();
+      reject(new ApiError("The upload was cancelled.", 0));
+    });
+
+    signal?.addEventListener("abort", onAbort);
+    xhr.send(body);
+  });
+}
+
 /* ------------------------------------------------------------------ */
 /* Streaming run events (Server-Sent Events)                          */
 /* ------------------------------------------------------------------ */
-/* Retained for a later phase. The Phase 1 backend exposes no run API, so       */
-/* nothing in the UI calls this yet.                                           */
 
 export interface StreamHandlers {
   onEvent: (event: RunEvent) => void;
-  onError?: (error: unknown) => void;
+  /** Called for transport and protocol failures, never for a caller abort. */
+  onError?: (error: ApiError) => void;
+  /** Called when the server closes the stream normally. */
   onClose?: () => void;
 }
 
 /**
  * Consume `GET /v1/runs/{id}/events` as an SSE stream.
  *
- * Uses `fetch` + a stream reader rather than the native `EventSource` so an
- * `Authorization: Bearer` header can be attached (EventSource cannot set
- * headers). Returns an abort function that closes the stream.
+ * Uses `fetch` + a stream reader rather than the native `EventSource` so
+ * headers can be attached later if the endpoint becomes authenticated. No
+ * timeout is applied: the stream is long-lived by design and ends when the run
+ * reaches a terminal state.
+ *
+ * Unknown event names are ignored rather than surfaced, so a new backend event
+ * type can never render as unlabelled progress. Returns an abort function;
+ * calling it closes the stream silently.
  */
 export function streamRunEvents(
   runId: string,
   handlers: StreamHandlers,
-  options: { token?: string } = {},
 ): () => void {
   const controller = new AbortController();
 
-  (async () => {
+  void (async () => {
     try {
-      const headers = new Headers({ Accept: "text/event-stream" });
-      if (options.token) headers.set("Authorization", `Bearer ${options.token}`);
-
-      const response = await fetch(apiV1Url(`/runs/${runId}/events`), {
-        headers,
-        signal: controller.signal,
-      });
+      const response = await fetch(
+        apiV1Url(`/runs/${encodeURIComponent(runId)}/events`),
+        {
+          headers: { Accept: "text/event-stream" },
+          signal: controller.signal,
+        },
+      );
 
       if (!response.ok || !response.body) {
         throw new ApiError(
-          `Failed to open event stream (${response.status}).`,
+          "The run event stream could not be opened.",
           response.status,
           response.headers.get(REQUEST_ID_HEADER) ?? undefined,
         );
@@ -269,42 +497,28 @@ export function streamRunEvents(
       for (;;) {
         const { done, value } = await reader.read();
         if (done) break;
-        buffer += decoder.decode(value, { stream: true });
 
-        // SSE frames are separated by a blank line.
-        let boundary = buffer.indexOf("\n\n");
-        while (boundary !== -1) {
-          const frame = buffer.slice(0, boundary);
-          buffer = buffer.slice(boundary + 2);
-          const event = parseSseFrame(frame);
-          if (event) handlers.onEvent(event);
-          boundary = buffer.indexOf("\n\n");
+        buffer += decoder.decode(value, { stream: true });
+        const { frames, rest } = parseSseBuffer(buffer);
+        buffer = rest;
+
+        for (const frame of frames) {
+          if (isRunEventType(frame.event)) {
+            handlers.onEvent({ type: frame.event });
+          }
         }
       }
       handlers.onClose?.();
     } catch (error) {
-      if ((error as Error)?.name === "AbortError") return;
-      handlers.onError?.(error);
+      // A caller abort (cancel or unmount) is not a failure.
+      if (controller.signal.aborted) return;
+      handlers.onError?.(
+        error instanceof ApiError
+          ? error
+          : new ApiError("The run event stream ended unexpectedly.", 0),
+      );
     }
   })();
 
   return () => controller.abort();
-}
-
-function parseSseFrame(frame: string): RunEvent | null {
-  let type: string | undefined;
-  const dataLines: string[] = [];
-
-  for (const line of frame.split("\n")) {
-    if (line.startsWith("event:")) type = line.slice(6).trim();
-    else if (line.startsWith("data:")) dataLines.push(line.slice(5).trim());
-  }
-
-  if (!type && dataLines.length === 0) return null;
-
-  const rawData = dataLines.join("\n");
-  return {
-    type: (type ?? "generating") as RunEventType,
-    data: rawData ? safeJsonParse(rawData) : undefined,
-  };
 }
