@@ -3,7 +3,7 @@
 # 3.14 fails the build outright: pip refuses the install with
 # "requires a different Python". Raise the constraint in pyproject.toml first,
 # then this, then the CI Python version — in that order.
-FROM python:3.13.5-slim-bookworm
+FROM python:3.13.14-slim-bookworm
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
