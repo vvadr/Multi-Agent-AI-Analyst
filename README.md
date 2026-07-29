@@ -55,6 +55,20 @@ npm run dev
 Then open `http://localhost:3000`. `.env.development` already points it at the
 local backend.
 
+## Contributing
+
+**Do all work on `staging`, and push to `staging`.** Never commit or push
+directly to `main` — it changes only through a pull request from `staging`.
+
+```bash
+git checkout staging
+git pull
+# ... commit ...
+git push
+```
+
+See the [branching model](docs/BRANCHING.md) for releases and hotfixes.
+
 ## Documentation
 
 - [Running environments (dev vs prod)](docs/ENVIRONMENTS.md)
