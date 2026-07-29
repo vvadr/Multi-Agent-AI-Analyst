@@ -41,6 +41,11 @@ const RUN_FAILED_MESSAGE =
  * event payloads are dropped by the API client, so nothing the model or the
  * router produced can appear here. The final answer arrives from a separate
  * `GET /v1/runs/{id}` once a terminal event is seen.
+ *
+ * The backend recalls earlier completed question/answer pairs on its own; that
+ * is stated once in the form hint. There is deliberately no transcript, no
+ * stored-memory view, and no endpoint here that would expose those records —
+ * recall is backend behaviour the reader should know about, not a surface.
  */
 export function AnalystWorkspace() {
   const [question, setQuestion] = useState("");
@@ -212,7 +217,9 @@ export function AnalystWorkspace() {
           className="mt-1 text-xs text-black/60 dark:text-white/60"
         >
           Answers are grounded in your indexed documents and, when the backend
-          enables it, web research.
+          enables it, web research. Follow-up questions can build on earlier
+          questions and answers from this local demo, so you can ask one without
+          repeating the context.
         </p>
 
         <div className="mt-3 flex flex-wrap gap-2">

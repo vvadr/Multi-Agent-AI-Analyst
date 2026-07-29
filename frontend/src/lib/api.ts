@@ -15,6 +15,8 @@
 
 import { apiUrl, apiV1Url } from "./config";
 import {
+  MAX_DOCUMENT_SIZE_LABEL,
+  SUPPORTED_FORMATS_LABEL,
   parseUploadedDocument,
   type UploadedDocument,
 } from "./documents";
@@ -282,7 +284,9 @@ const CREATE_RUN_MESSAGES: Readonly<Record<number, string>> = {
   404: DEMO_DISABLED_MESSAGE,
   422: "That question could not be accepted. Try rephrasing it.",
   429: "The demo is already running an analysis. Try again in a moment.",
-  503: "The analyst services are unavailable right now.",
+  503:
+    "The analyst services are unavailable right now. This is a backend or " +
+    "provider availability problem, not a problem with your documents.",
 };
 
 /** `POST /v1/runs` — accepted with 202 while the run executes in the background. */
@@ -343,12 +347,24 @@ export async function getRun(
   return detail;
 }
 
+/**
+ * Fixed copy per upload status.
+ *
+ * 422 covers every extraction failure the backend can hit — a malformed PDF, a
+ * broken Office archive, an undecodable text file, a password-protected PDF, a
+ * document with no readable text. Its `detail` is never shown, so one message
+ * has to name the plausible causes without claiming which one occurred.
+ */
 const UPLOAD_MESSAGES: Readonly<Record<number, string>> = {
   404: DEMO_DISABLED_MESSAGE,
-  413: "That file is larger than the upload limit.",
-  415: "Only .txt files are supported.",
-  422: "That file must be non-empty UTF-8 text.",
-  503: "Document services are unavailable right now.",
+  413: `That file is larger than the ${MAX_DOCUMENT_SIZE_LABEL} limit.`,
+  415: `Unsupported file type. Choose a ${SUPPORTED_FORMATS_LABEL} file.`,
+  422:
+    "That file could not be read. It may be corrupted, password-protected, " +
+    "or contain no extractable text — password-protected PDFs are not supported.",
+  503:
+    "Document services are unavailable right now. This is a backend or " +
+    "provider availability problem, not a problem with your file.",
 };
 
 export interface UploadOptions {
@@ -359,7 +375,7 @@ export interface UploadOptions {
 }
 
 /**
- * `POST /v1/documents` — multipart upload of one `.txt` file.
+ * `POST /v1/documents` — multipart upload of one supported document.
  *
  * Uses `XMLHttpRequest` rather than `fetch`: only XHR reports request-body
  * upload progress, which the UI needs. A 201 means indexing already finished,

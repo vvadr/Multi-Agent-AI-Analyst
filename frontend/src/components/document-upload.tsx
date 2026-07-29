@@ -4,8 +4,10 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 import { ApiError, uploadDocument } from "@/lib/api";
 import {
-  ACCEPTED_EXTENSION,
+  ACCEPT_ATTRIBUTE,
   MAX_DOCUMENT_SIZE_LABEL,
+  SUPPORTED_FORMATS_LABEL,
+  UNSUPPORTED_LEGACY_EXTENSIONS,
   formatFileSize,
   validateDocumentFile,
   type UploadedDocument,
@@ -20,7 +22,7 @@ type UploadState =
   | { kind: "error"; message: string; requestId?: string };
 
 /**
- * Upload one `.txt` document into the local demo tenant.
+ * Upload one supported document into the local demo tenant.
  *
  * Indexing is synchronous on the backend: the 201 response already means the
  * file is chunked, embedded, and searchable, so there is nothing to poll. The
@@ -117,7 +119,7 @@ export function DocumentUpload() {
         1 · Add a document
       </h2>
       <p className="mt-1 text-sm text-black/60 dark:text-white/60">
-        Upload a UTF-8 {ACCEPTED_EXTENSION} file up to {MAX_DOCUMENT_SIZE_LABEL}.
+        Upload a {SUPPORTED_FORMATS_LABEL} file up to {MAX_DOCUMENT_SIZE_LABEL}.
         It is indexed on the backend so answers can cite it.
       </p>
 
@@ -126,17 +128,27 @@ export function DocumentUpload() {
           htmlFor="document-file"
           className="block text-sm font-medium"
         >
-          Choose a {ACCEPTED_EXTENSION} file
+          Choose a document
         </label>
         <input
           ref={inputRef}
           id="document-file"
           type="file"
-          accept=".txt,text/plain"
+          accept={ACCEPT_ATTRIBUTE}
           onChange={handleSelect}
           disabled={isUploading}
+          aria-describedby="document-file-limits"
           className="mt-2 block w-full text-sm file:mr-3 file:rounded-full file:border file:border-black/[.08] file:bg-transparent file:px-3 file:py-1 file:text-sm file:text-inherit hover:file:bg-black/[.04] disabled:opacity-50 dark:file:border-white/[.145] dark:hover:file:bg-white/[.06]"
         />
+        <p
+          id="document-file-limits"
+          className="mt-2 text-xs text-black/60 dark:text-white/60"
+        >
+          Not supported: password-protected PDFs, and legacy{" "}
+          {UNSUPPORTED_LEGACY_EXTENSIONS.join(", ")} files — save those as
+          .docx, .xlsx, or PDF first. Scanned PDFs with no selectable text
+          cannot be indexed either.
+        </p>
       </div>
 
       {state.kind === "selected" && (

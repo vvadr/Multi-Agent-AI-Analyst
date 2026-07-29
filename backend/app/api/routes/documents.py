@@ -5,6 +5,7 @@ from uuid import uuid4
 import httpx
 from botocore.exceptions import BotoCoreError, ClientError
 from fastapi import APIRouter, File, HTTPException, UploadFile, status
+from google.genai import errors as genai_errors
 from pydantic import BaseModel
 
 from app.core.config import Settings, get_settings
@@ -69,6 +70,10 @@ async def upload_document(file: UploadFile = UPLOAD_FILE) -> UploadedDocument:
     except (
         BotoCoreError,
         ClientError,
+        # Raised when the backend calls Gemini directly (no LiteLLM gateway):
+        # quota, auth, and provider outages all arrive as APIError. Without it
+        # they escape as a 500 instead of the 503 this handler is here to send.
+        genai_errors.APIError,
         httpx.HTTPError,
         RuntimeError,
         ValueError,

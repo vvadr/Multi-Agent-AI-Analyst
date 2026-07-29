@@ -47,6 +47,16 @@ Put it in `.env.development` as `LITELLM_MASTER_KEY`. This is not a Google key.
 The Compose API container receives this token but explicitly receives an empty
 `GEMINI_API_KEY`; only the LiteLLM container receives the provider credential.
 
+The gateway container reads its own file, not the backend's. Create it from the
+committed template and keep both values in sync with `.env.development`:
+
+```powershell
+Copy-Item infra\litellm\litellm.env.example infra\litellm\litellm.env
+```
+
+`infra/litellm/litellm.env` is gitignored; the `.example` beside it is not, and
+carries placeholders only.
+
 ## PostgreSQL
 
 Development uses the Compose PostgreSQL URL already present in the template.

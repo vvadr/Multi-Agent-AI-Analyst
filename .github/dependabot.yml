@@ -11,6 +11,17 @@ updates:
     schedule:
       interval: weekly
     open-pull-requests-limit: 3
+    ignore:
+      # The base image's interpreter is pinned by `requires-python` in
+      # backend/pyproject.toml (>=3.11,<3.14). A minor bump makes `pip install .`
+      # fail with "requires a different Python", so the image cannot build —
+      # exactly what happened when 3.13.5 was bumped to 3.14.6. Patch updates
+      # within the supported minor are still proposed; widening the range is a
+      # deliberate change to pyproject.toml, not an automated one.
+      - dependency-name: python
+        update-types:
+          - version-update:semver-major
+          - version-update:semver-minor
 
   - package-ecosystem: docker
     directory: /infra

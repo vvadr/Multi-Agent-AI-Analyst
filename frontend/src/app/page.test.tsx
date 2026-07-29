@@ -34,7 +34,20 @@ describe("Home", () => {
   it("offers the document uploader", () => {
     render(<Home />);
 
-    expect(screen.getByLabelText(/choose a \.txt file/i)).toBeInTheDocument();
+    expect(screen.getByLabelText(/choose a document/i)).toBeInTheDocument();
+  });
+
+  it("states the supported formats and limit next to the uploader", () => {
+    render(<Home />);
+
+    expect(
+      screen.getByText(
+        /PDF, DOCX, XLSX, TXT, Markdown, CSV, TSV, JSON, or HTML file up to 10 MB/i,
+      ),
+    ).toBeInTheDocument();
+    expect(screen.getByText(/not supported:/i)).toHaveTextContent(
+      /password-protected PDFs/i,
+    );
   });
 
   it("offers the question form", () => {
@@ -60,5 +73,16 @@ describe("Home", () => {
       .not.toBeInTheDocument();
     expect(screen.queryByLabelText(/password|email/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/run history|previous runs/i)).not.toBeInTheDocument();
+  });
+
+  it("mentions follow-up context without exposing a transcript", () => {
+    render(<Home />);
+
+    expect(
+      screen.getByText(/follow-up questions can build on earlier questions/i),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("heading", { name: /conversation|transcript|history/i }),
+    ).not.toBeInTheDocument();
   });
 });

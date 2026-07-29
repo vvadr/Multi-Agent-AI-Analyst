@@ -17,8 +17,9 @@ export default function Home() {
             database, or model secrets.
           </p>
           <p className="text-sm text-black/60 dark:text-white/60">
-            A local, unauthenticated demo: one shared workspace, and nothing is
-            kept once the backend restarts.
+            A local, unauthenticated demo: one shared workspace and no
+            accounts. Completed questions and answers are reused only as
+            background context for follow-ups here.
           </p>
         </div>
 

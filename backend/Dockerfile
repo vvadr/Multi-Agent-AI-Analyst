@@ -1,4 +1,9 @@
-FROM python:3.14.6-slim-bookworm
+# Must satisfy `requires-python = ">=3.11,<3.14"` in pyproject.toml, and should
+# match the interpreter Backend CI tests on (setup-python 3.13). A bump to
+# 3.14 fails the build outright: pip refuses the install with
+# "requires a different Python". Raise the constraint in pyproject.toml first,
+# then this, then the CI Python version — in that order.
+FROM python:3.13.5-slim-bookworm
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
