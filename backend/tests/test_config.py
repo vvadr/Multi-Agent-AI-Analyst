@@ -77,6 +77,11 @@ def test_production_requires_all_service_configuration() -> None:
         Settings(**_production_settings(qdrant_api_key=None))
 
 
+def test_production_rejects_the_unauthenticated_demo_api() -> None:
+    with pytest.raises(ValidationError, match="unauthenticated demo"):
+        Settings(**_production_settings(enable_unauthenticated_demo_api=True))
+
+
 def test_secret_values_are_redacted_from_repr() -> None:
     settings = Settings(**_production_settings())
 
@@ -85,4 +90,3 @@ def test_secret_values_are_redacted_from_repr() -> None:
     assert "jwt-secret" not in rendered
     assert "gemini-secret" not in rendered
     assert "storage-secret" not in rendered
-

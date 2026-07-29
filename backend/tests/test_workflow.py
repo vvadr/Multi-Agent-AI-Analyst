@@ -1,0 +1,73 @@
+from app.agents.workflow import WorkflowDependencies, run_workflow
+from app.ingestion.service import SearchResult
+from app.services.safe_sql import SqlQueryResult
+from app.services.web_search import WebSearchResult
+
+
+def test_graph_routes_retrieval_generates_answer_and_emits_safe_events() -> None:
+    events: list[str] = []
+
+    def generate(prompt: str) -> str:
+        if "You route" in prompt:
+            if "Completed steps: []" in prompt:
+                return '{"next":"retriever"}'
+            return '{"next":"finish"}'
+        if "Return JSON only" in prompt:
+            return '{"ok":true,"reason":"Supported"}'
+        return "Sustainability was a core investment priority."
+
+    def search_documents(**_kwargs: object) -> list[SearchResult]:
+        return [
+            SearchResult(
+                document_id="report-1",
+                filename="report.txt",
+                chunk_index=0,
+                content="Sustainability was a core investment priority.",
+                score=0.99,
+            )
+        ]
+
+    state = run_workflow(
+        "What was a priority?",
+        dependencies=WorkflowDependencies(
+            generate=generate,
+            search_documents=search_documents,
+            search_web=lambda **_kwargs: [],
+            execute_sql=None,
+            tenant_id="demo",
+            max_steps=8,
+        ),
+        emit=lambda event, _data: events.append(event),
+    )
+
+    assert state["answer"].startswith("Sustainability")
+    assert state["citations"][0]["kind"] == "document"
+    assert events == ["routing", "retrieving", "routing", "generating"]
+
+
+def test_graph_can_route_a_numeric_question_to_the_approved_sql_agent() -> None:
+    def generate(prompt: str) -> str:
+        if "You route" in prompt:
+            return '{"next":"data"}' if "Completed steps: []" in prompt else '{"next":"finish"}'
+        if "SQL only" in prompt:
+            return "SELECT revenue FROM analytics.monthly_metrics LIMIT 1"
+        if "Return JSON only" in prompt:
+            return '{"ok":true,"reason":"Supported"}'
+        return "East revenue was 125000."
+
+    state = run_workflow(
+        "What was revenue?",
+        dependencies=WorkflowDependencies(
+            generate=generate,
+            search_documents=lambda **_kwargs: [],
+            search_web=lambda **_kwargs: list[WebSearchResult](),
+            execute_sql=lambda _query: SqlQueryResult(
+                columns=["revenue"], rows=[{"revenue": 125000}]
+            ),
+            tenant_id="demo",
+            max_steps=8,
+        ),
+    )
+
+    assert "data(sql)" in state["steps"]
+    assert state["citations"][0]["kind"] == "analytics"
