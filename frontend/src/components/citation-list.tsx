@@ -25,8 +25,11 @@ export function CitationList({ citations }: { citations: readonly Citation[] }) 
 
   return (
     <div className="mt-5">
-      <h3 className="text-sm font-semibold">Sources</h3>
-      <ol className="mt-2 space-y-3">
+      <h3 id="citation-list-heading" className="text-sm font-semibold">
+        Sources supporting this answer
+      </h3>
+      {/* Named so it is distinguishable from the workflow lists above it. */}
+      <ol aria-labelledby="citation-list-heading" className="mt-2 space-y-3">
         {citations.map((citation) => (
           <li
             key={citation.id}

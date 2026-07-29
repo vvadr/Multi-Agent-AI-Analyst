@@ -76,6 +76,32 @@ class QdrantVectorStore:
                 raise RuntimeError("vector store returned an invalid point payload") from None
         return results
 
+    def delete_document(self, *, tenant_id: str, document_id: str) -> None:
+        """Drop every chunk of one document belonging to one tenant.
+
+        Both conditions are required. Filtering on `document_id` alone would let
+        a caller who guesses an id delete another organization's vectors.
+        """
+        if not tenant_id.strip() or not document_id.strip():
+            raise ValueError("tenant_id and document_id must not be empty")
+        self._ensure_collection()
+        self.client.delete(
+            collection_name=self.collection,
+            points_selector=models.FilterSelector(
+                filter=models.Filter(
+                    must=[
+                        models.FieldCondition(
+                            key="tenant_id", match=models.MatchValue(value=tenant_id)
+                        ),
+                        models.FieldCondition(
+                            key="document_id", match=models.MatchValue(value=document_id)
+                        ),
+                    ]
+                )
+            ),
+            wait=True,
+        )
+
     def close(self) -> None:
         self.client.close()
 

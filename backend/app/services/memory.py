@@ -1,4 +1,9 @@
-"""Tenant-filtered long-term conversation memory for the local demo."""
+"""Tenant-filtered long-term conversation memory.
+
+Both writing and recall take an explicit `tenant_id`. An earlier version read
+the tenant from configuration, which meant every organization recalled from the
+same pool — the caller must now say whose memory it is asking for.
+"""
 
 from uuid import NAMESPACE_URL, uuid5
 
@@ -16,7 +21,6 @@ class ConversationMemory:
             raise ValueError("Qdrant is not configured")
         self.collection = f"{settings.qdrant_collection}_memory"
         self.dimensions = settings.embedding_dimensions
-        self.tenant_id = settings.demo_tenant_id
         self.embeddings = build_embedding_provider(settings)
         self.client = QdrantClient(
             url=settings.qdrant_url,
@@ -41,7 +45,9 @@ class ConversationMemory:
             ],
         )
 
-    def recall(self, question: str, limit: int = 3) -> list[str]:
+    def recall(self, question: str, limit: int = 3, *, tenant_id: str) -> list[str]:
+        if not tenant_id.strip():
+            raise ValueError("tenant_id must not be empty")
         vector = self.embeddings.embed([question])[0]
         self._ensure_collection()
         response = self.client.query_points(
@@ -51,7 +57,7 @@ class ConversationMemory:
                 must=[
                     models.FieldCondition(
                         key="tenant_id",
-                        match=models.MatchValue(value=self.tenant_id),
+                        match=models.MatchValue(value=tenant_id),
                     )
                 ]
             ),

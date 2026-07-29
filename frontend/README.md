@@ -63,6 +63,22 @@ There is intentionally **no `.env.example`**; development guidance lives in
 | `NEXT_PUBLIC_API_V1_PREFIX` | no (defaults `/v1`) | Versioned API prefix; must match the backend `API_V1_PREFIX`. |
 | `NEXT_PUBLIC_APP_ENV` | no (defaults `development`) | `development` or `production`. Any other value is rejected. |
 
+### Production values
+
+Set exactly these three in the Vercel project (Environment → Production).
+There is nothing else to configure, and none of it is secret:
+
+```dotenv
+NEXT_PUBLIC_API_BASE_URL=https://<your-deployed-backend>   # HTTPS, no trailing slash
+NEXT_PUBLIC_API_V1_PREFIX=/v1
+NEXT_PUBLIC_APP_ENV=production
+```
+
+`NEXT_PUBLIC_API_BASE_URL` must be the **deployed HTTPS backend URL**. The build
+fails if it is missing, `http`, localhost, or still a placeholder — see the
+validation rules above. The backend's `ALLOWED_ORIGINS` must in turn include the
+deployed frontend origin, or the browser blocks every call at CORS.
+
 ### Validation rules
 
 `src/lib/config.ts` validates this configuration at module load, so a bad
@@ -163,6 +179,7 @@ Three rules keep model- and provider-controlled text out of the page:
   event payloads entirely (`routing` carries the chosen route, `retrieving`
   carries the source), so no internal trace can reach the DOM. Unknown event
   names are ignored rather than rendered.
+- **The live workflow trace is a fixed, public-stage view.** See below.
 - **Failures use fixed local copy.** `GET /v1/runs/{id}` returns an `error`
   string; the parser deliberately does not read it. The same applies to HTTP
   `detail` bodies — each operation maps the status onto its own message and
@@ -171,6 +188,44 @@ Three rules keep model- and provider-controlled text out of the page:
   `http(s)` is dropped during parsing and re-checked at render time, so a
   `javascript:` source cannot produce an anchor. Web citations are labelled as
   external and open with `rel="noopener noreferrer"`.
+
+### Live workflow trace
+
+`src/components/workflow-trace.tsx` shows the run as four fixed stages, in the
+order the backend runs them:
+
+| Step | Stage | Driven by |
+| --- | --- | --- |
+| 1 | **Supervisor** | `run_started`, `routing` |
+| 2 | **Selected agent** | `retrieving` → research wording, `querying` → analytics wording |
+| 3 | **Quality review** | `generating`, then the terminal lifecycle |
+| 4 | **Final answer** | the terminal lifecycle and `GET /v1/runs/{id}` |
+
+Each stage shows one of six statuses — **Waiting**, **In progress**, **Done**,
+**Not needed**, **Stopped**, **Not reached** — as text, with colour only as a
+redundant second signal. Progress, completion, cancellation, and failure are
+therefore distinguishable without relying on colour: a cancelled run reads
+"Stopped when you cancelled this run", a failed one "Stopped when the run could
+not continue", and neither borrows a character of backend text.
+
+What makes this safe:
+
+- The component receives **event types only** — never payloads, and never the
+  event name as text. Every visible string is a local constant selected by
+  comparing allow-listed names against the lifecycle phase.
+- The **critic has no public event**, so its stage is derived from the draft and
+  terminal lifecycle alone and never states a verdict, score, or reviewer text.
+- An unrecognised event name renders nothing; the stage falls back to the
+  supervisor rather than displaying the unknown value.
+- **Detailed sources appear only after completion**, through the validated
+  citation contract — the trace itself never names a document, URL, or query.
+
+Accessibility: the trace is an ordered list of `h4` stage headings with
+`aria-current="step"` on the active stage. A separate one-sentence
+`role="status"` live region announces the current stage, so assistive technology
+hears the change instead of re-reading every stage on each update. When
+cancelling or a failure removes the focused Cancel button, focus moves to the
+**Try again** button that replaces it — and only when focus was actually lost.
 
 ### Document uploads
 

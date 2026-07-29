@@ -105,10 +105,41 @@ export function validateDocumentFile(file: File): DocumentValidationError | null
  * Indexing is synchronous: a 201 means the document is chunked, embedded, and
  * searchable, so there is no status field to poll.
  */
+/**
+ * Ingestion happens in a background worker, so a document has a lifecycle
+ * rather than existing the moment the upload returns.
+ */
+export const DOCUMENT_STATUSES = [
+  "pending",
+  "processing",
+  "ready",
+  "failed",
+  "deleted",
+] as const;
+
+export type DocumentStatus = (typeof DOCUMENT_STATUSES)[number];
+
 export interface UploadedDocument {
   id: string;
   filename: string;
   chunks: number;
+  status: DocumentStatus;
+}
+
+/** Reader-facing copy for each stage. */
+export const DOCUMENT_STATUS_LABELS: Readonly<Record<DocumentStatus, string>> = {
+  pending: "Queued",
+  processing: "Indexing",
+  ready: "Ready",
+  failed: "Could not be indexed",
+  deleted: "Removed",
+};
+
+export function isDocumentStatus(value: unknown): value is DocumentStatus {
+  return (
+    typeof value === "string" &&
+    (DOCUMENT_STATUSES as readonly string[]).includes(value)
+  );
 }
 
 export function parseUploadedDocument(value: unknown): UploadedDocument | null {
@@ -119,12 +150,29 @@ export function parseUploadedDocument(value: unknown): UploadedDocument | null {
   if (!id) return null;
 
   const chunks = readNumber(record, "chunks");
+  const status = record.status;
 
   return {
     id,
     filename: readString(record, "filename") ?? "",
     chunks: chunks !== undefined && chunks >= 0 ? Math.trunc(chunks) : 0,
+    // An unrecognized status is treated as still in flight rather than ready,
+    // so a contract drift never renders an unindexed document as searchable.
+    status: isDocumentStatus(status) ? status : "pending",
   };
+}
+
+export function parseDocumentList(value: unknown): UploadedDocument[] | null {
+  const record = asRecord(value);
+  if (!record || !Array.isArray(record.documents)) return null;
+
+  const documents: UploadedDocument[] = [];
+  for (const entry of record.documents) {
+    const parsed = parseUploadedDocument(entry);
+    // One malformed entry must not discard the rest of the list.
+    if (parsed) documents.push(parsed);
+  }
+  return documents;
 }
 
 /**

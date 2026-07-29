@@ -28,8 +28,11 @@ placeholders.
 | --- | --- | --- | --- |
 | `JWT_SECRET_KEY` | yes | none | Token signing key |
 | `JWT_ALGORITHM` | no | `HS256` | Token algorithm |
+| `JWT_ISSUER` | no | `multi-agent-ai-analyst` | Required issuer claim for access tokens |
+| `JWT_AUDIENCE` | no | `multi-agent-ai-analyst-web` | Required audience claim for access tokens |
 | `ACCESS_TOKEN_EXPIRE_MINUTES` | no | `30` | Access-token lifetime |
 | `REFRESH_TOKEN_EXPIRE_DAYS` | no | `7` | Refresh-token lifetime |
+| `INVITE_EXPIRE_HOURS` | no | `168` | Lifetime of one-time, invite-only account links |
 
 Authentication endpoints are implemented in the next project phase.
 
@@ -87,6 +90,7 @@ The S3 client uses path-style addressing for MinIO and Supabase compatibility.
 | `LANGFUSE_PUBLIC_KEY` | yes | none |
 | `LANGFUSE_SECRET_KEY` | yes | none |
 | `LANGFUSE_BASE_URL` | no | `https://cloud.langfuse.com` |
+| `ENABLE_LANGFUSE_TRACING` | no | `false` |
 | `REDIS_URL` | yes | none |
 | `MAX_AGENT_STEPS` | no | `8` |
 | `MAX_TOOL_CALLS` | no | `5` |
@@ -97,6 +101,11 @@ The S3 client uses path-style addressing for MinIO and Supabase compatibility.
 | `ENABLE_CODE_EXECUTION` | no | `false` |
 
 Web search and code execution remain disabled for the pilot foundation.
+
+Langfuse tracing is disabled unless explicitly enabled. When enabled, both
+Langfuse keys are required. The backend records workflow structure, model name,
+token usage, and character counts only; it does not export prompts, evidence,
+answers, SQL, or credentials to Langfuse.
 
 ## Frontend public configuration
 

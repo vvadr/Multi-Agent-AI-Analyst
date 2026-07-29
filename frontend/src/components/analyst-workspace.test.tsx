@@ -2,6 +2,8 @@ import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { clearAllDrafts } from "@/lib/drafts";
+
 import { AnalystWorkspace } from "./analyst-workspace";
 
 function jsonResponse(body: unknown, status: number): Response {
@@ -17,6 +19,20 @@ function sseResponse(chunks: string[]): Response {
     start(controller) {
       for (const chunk of chunks) controller.enqueue(encoder.encode(chunk));
       controller.close();
+    },
+  });
+  return new Response(stream, {
+    status: 200,
+    headers: { "Content-Type": "text/event-stream" },
+  });
+}
+
+/** Sends the chunks, then never closes — the run is still going server-side. */
+function openSseResponse(chunks: string[]): Response {
+  const encoder = new TextEncoder();
+  const stream = new ReadableStream<Uint8Array>({
+    start(controller) {
+      for (const chunk of chunks) controller.enqueue(encoder.encode(chunk));
     },
   });
   return new Response(stream, {
@@ -43,14 +59,20 @@ let fetchMock: ReturnType<typeof vi.fn>;
 function routeBackend({
   events,
   run = COMPLETED_RUN,
+  /** Answer for the mount-time `GET /v1/runs`. Empty means nothing to rejoin. */
+  runList = { runs: [] },
 }: {
   events: Response | (() => Response);
   run?: unknown;
+  runList?: unknown;
 }) {
   fetchMock.mockImplementation((input: unknown, init?: RequestInit) => {
     const url = String(input);
     if (url.endsWith("/v1/runs") && init?.method === "POST") {
       return Promise.resolve(jsonResponse({ id: "run-1", status: "queued" }, 202));
+    }
+    if (url.endsWith("/v1/runs")) {
+      return Promise.resolve(jsonResponse(runList, 200));
     }
     if (url.includes("/events")) {
       return Promise.resolve(typeof events === "function" ? events() : events);
@@ -67,10 +89,15 @@ async function ask(question = "What changed?") {
 beforeEach(() => {
   fetchMock = vi.fn();
   vi.stubGlobal("fetch", fetchMock);
+  // The draft store is module state that deliberately outlives a remount, so
+  // each case starts from an empty one rather than inheriting typing from the
+  // case before it.
+  clearAllDrafts();
 });
 
 afterEach(() => {
   vi.unstubAllGlobals();
+  clearAllDrafts();
 });
 
 describe("AnalystWorkspace", () => {
@@ -103,8 +130,33 @@ describe("AnalystWorkspace", () => {
     expect(screen.getByText("Gathering source material")).toBeInTheDocument();
     expect(screen.getByText("Writing the answer")).toBeInTheDocument();
 
-    const [, init] = fetchMock.mock.calls[0];
-    expect(JSON.parse(init.body)).toEqual({ question: "What changed?" });
+    // Located by method rather than by index: the workspace also asks for the
+    // run list on mount, to rejoin anything still in flight.
+    const created = fetchMock.mock.calls.find(
+      ([, init]) => (init as RequestInit | undefined)?.method === "POST",
+    );
+    expect(JSON.parse((created?.[1] as RequestInit).body as string)).toEqual({
+      question: "What changed?",
+    });
+  });
+
+  it("rejoins a run that was still going when the page loaded", async () => {
+    // Durability made visible: nothing is remembered in the browser, the
+    // backend is asked what is still running.
+    routeBackend({
+      runList: { runs: [{ id: "run-9", status: "running" }] },
+      events: sseResponse([
+        frame("retrieving"),
+        frame("completed", { citation_count: 0 }),
+      ]),
+    });
+
+    render(<AnalystWorkspace />);
+
+    expect(await screen.findByText("Answer ready.")).toBeInTheDocument();
+    expect(
+      fetchMock.mock.calls.some(([url]) => String(url).endsWith("/v1/runs/run-9/events")),
+    ).toBe(true);
   });
 
   it("never renders event payloads or raw event names", async () => {
@@ -175,7 +227,7 @@ describe("AnalystWorkspace", () => {
       await screen.findByText("Revenue grew 4% year on year."),
     ).toBeInTheDocument();
 
-    const sources = screen.getByRole("list");
+    const sources = screen.getByRole("list", { name: /sources supporting/i });
     expect(within(sources).getByText("q3-report.txt")).toBeInTheDocument();
     expect(within(sources).getByText(/chunk 3/)).toBeInTheDocument();
     expect(
@@ -371,6 +423,152 @@ describe("AnalystWorkspace", () => {
     await ask();
     await screen.findByText("Answer ready.");
 
-    expect(container.querySelector('[aria-live="polite"]')).not.toBeNull();
+    const live = container.querySelector('[aria-live="polite"]');
+    expect(live).not.toBeNull();
+    // One sentence, not a re-read of the whole stage list on every update.
+    expect(live).toHaveAttribute("role", "status");
+    expect(live).toHaveTextContent("Answer ready.");
+    expect(live?.querySelector("ol")).toBeNull();
+  });
+});
+
+describe("AnalystWorkspace workflow trace", () => {
+  function trace(): HTMLElement {
+    return screen.getByRole("list", { name: "Live workflow trace" });
+  }
+
+  function stage(name: RegExp): HTMLElement {
+    const item = within(trace())
+      .getAllByRole("listitem")
+      .find((element) => name.test(element.textContent ?? ""));
+    if (!item) throw new Error(`No stage matching ${name}`);
+    return item;
+  }
+
+  it("walks supervisor → agent → review → answer over one SSE run", async () => {
+    routeBackend({
+      events: sseResponse([
+        frame("run_started", { run_id: "run-1" }),
+        frame("routing", { next: "retriever" }),
+        frame("retrieving", { source: "documents" }),
+        frame("generating"),
+        frame("completed", { citation_count: 1 }),
+      ]),
+    });
+    render(<AnalystWorkspace />);
+
+    await ask();
+    await screen.findByText("Answer ready.");
+
+    expect(within(trace()).getAllByRole("listitem")).toHaveLength(4);
+    expect(stage(/supervisor/i)).toHaveTextContent("Done");
+    expect(stage(/selected agent/i)).toHaveTextContent(
+      "Gathered approved source material.",
+    );
+    expect(stage(/quality review/i)).toHaveTextContent("Done");
+    expect(stage(/final answer/i)).toHaveTextContent("Ready below, with its sources.");
+  });
+
+  it("keeps every payload, route, and reasoning field out of the trace", async () => {
+    routeBackend({
+      events: sseResponse([
+        frame("routing", { next: "web", rationale: "SECRET_TRACE" }),
+        frame("retrieving", { source: "web", query: "SECRET_QUERY" }),
+        frame("generating", { critic: "REJECTED: hallucinated" }),
+        frame("completed", { trace_id: "SECRET_TRACE_ID" }),
+      ]),
+      run: { ...COMPLETED_RUN, error: "gemini: 429 RESOURCE_EXHAUSTED" },
+    });
+    render(<AnalystWorkspace />);
+
+    await ask();
+    await screen.findByText("Answer ready.");
+
+    expect(trace()).not.toHaveTextContent(
+      /SECRET_TRACE|SECRET_QUERY|SECRET_TRACE_ID|rationale|REJECTED|gemini/i,
+    );
+    // Raw event names are internal contract, not reader-facing labels.
+    for (const name of ["run_started", "routing", "retrieving", "generating"]) {
+      expect(trace()).not.toHaveTextContent(name);
+    }
+  });
+
+  it("marks the trace as failed without borrowing the backend's error text", async () => {
+    routeBackend({
+      events: sseResponse([
+        frame("routing"),
+        frame("retrieving"),
+        frame("failed", { message: "Gemini quota exceeded" }),
+      ]),
+    });
+    render(<AnalystWorkspace />);
+
+    await ask();
+    await screen.findByRole("alert");
+
+    expect(stage(/selected agent/i)).toHaveTextContent(
+      "Stopped when the run could not continue.",
+    );
+    expect(stage(/final answer/i)).toHaveTextContent("Not reached");
+    expect(trace()).not.toHaveTextContent(/gemini|quota/i);
+  });
+
+  it("shows a cancelled run as stopped by the reader, not as a failure", async () => {
+    fetchMock.mockImplementation((input: unknown, init?: RequestInit) => {
+      const url = String(input);
+      if (url.endsWith("/v1/runs") && init?.method === "POST") {
+        return Promise.resolve(jsonResponse({ id: "run-1", status: "queued" }, 202));
+      }
+      // Emits one stage, then stays open like a long-running analysis.
+      return Promise.resolve(openSseResponse([frame("routing")]));
+    });
+    render(<AnalystWorkspace />);
+
+    await ask();
+    // Both the live region and the trail carry the label once routing arrives.
+    await screen.findAllByText("Planning the next step");
+    await userEvent.click(screen.getByRole("button", { name: /cancel/i }));
+
+    expect(stage(/supervisor/i)).toHaveTextContent(
+      "Stopped when you cancelled this run.",
+    );
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(screen.getByRole("status")).toHaveTextContent(
+      /stopped following this run/i,
+    );
+  });
+
+  it("hides the trace when the run never started", async () => {
+    fetchMock.mockRejectedValue(new TypeError("Failed to fetch"));
+    render(<AnalystWorkspace />);
+
+    await ask();
+    await screen.findByRole("alert");
+
+    expect(
+      screen.queryByRole("list", { name: "Live workflow trace" }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("moves focus to Try again when cancelling removes the focused control", async () => {
+    fetchMock.mockImplementation((input: unknown, init?: RequestInit) => {
+      const url = String(input);
+      if (url.endsWith("/v1/runs") && init?.method === "POST") {
+        return Promise.resolve(jsonResponse({ id: "run-1", status: "queued" }, 202));
+      }
+      return Promise.resolve(
+        new Response(new ReadableStream<Uint8Array>({ start() {} })),
+      );
+    });
+    render(<AnalystWorkspace />);
+
+    await ask();
+    const cancelButton = await screen.findByRole("button", { name: /cancel/i });
+    cancelButton.focus();
+    await userEvent.click(cancelButton);
+
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: /try again/i })).toHaveFocus(),
+    );
   });
 });

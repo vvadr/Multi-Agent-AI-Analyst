@@ -17,6 +17,7 @@ def _configured_settings() -> Settings:
         object_storage_region="us-east-1",
         object_storage_access_key_id="storage-key",
         object_storage_secret_access_key="storage-secret",
+        redis_url="rediss://cache.example.com:6379",
     )
 
 
@@ -49,8 +50,17 @@ def test_probe_failure_is_redacted_and_not_ready(monkeypatch) -> None:
 def test_unconfigured_services_are_not_probed() -> None:
     result = readiness.check_readiness(Settings(app_env="test"))
 
-    assert all(not component["configured"] for component in result.values())
-    assert all(not component["reachable"] for component in result.values())
+    external = {name: value for name, value in result.items() if name != "queue"}
+    assert all(not component["configured"] for component in external.values())
+    assert all(not component["reachable"] for component in external.values())
+
+
+def test_the_in_process_queue_reports_ready_without_redis() -> None:
+    # Without REDIS_URL the API runs an embedded worker. There is a queue; it
+    # just has no socket, so it can never be unreachable.
+    result = readiness.check_readiness(Settings(app_env="test"))
+
+    assert result["queue"] == {"configured": True, "reachable": True}
 
 
 def test_database_probe_executes_select_one(monkeypatch) -> None:

@@ -1,4 +1,4 @@
-"""Small object-storage adapter for the development document upload endpoint."""
+"""Object-storage adapter for uploaded source documents."""
 
 from uuid import UUID
 
@@ -41,8 +41,7 @@ class ObjectStorage:
         content_type: str,
     ) -> str:
         """Store an upload under a server-owned, non-user-controlled key."""
-        safe_name = "".join(char for char in filename if char.isalnum() or char in ".-_")
-        key = f"{tenant_id}/{document_id}/{safe_name or 'document.txt'}"
+        key = object_key(tenant_id=tenant_id, document_id=document_id, filename=filename)
         self.client.put_object(
             Bucket=self.bucket,
             Key=key,
@@ -50,3 +49,22 @@ class ObjectStorage:
             ContentType=content_type,
         )
         return key
+
+    def get_document(self, key: str) -> bytes:
+        """Read one stored object back for out-of-band processing."""
+        response = self.client.get_object(Bucket=self.bucket, Key=key)
+        return bytes(response["Body"].read())
+
+    def delete_document(self, key: str) -> None:
+        self.client.delete_object(Bucket=self.bucket, Key=key)
+
+
+def object_key(*, tenant_id: str, document_id: UUID, filename: str) -> str:
+    """Build a key from values the server controls.
+
+    The uploaded filename contributes only characters that survive this filter,
+    and it is never the leading path segment, so a name like `../../etc/passwd`
+    cannot escape the tenant prefix.
+    """
+    safe_name = "".join(char for char in filename if char.isalnum() or char in ".-_")
+    return f"{tenant_id}/{document_id}/{safe_name.lstrip('.') or 'document.txt'}"

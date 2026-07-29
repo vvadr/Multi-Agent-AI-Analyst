@@ -70,8 +70,37 @@ class Settings(BaseSettings):
 
     jwt_secret_key: SecretStr | None = None
     jwt_algorithm: str = "HS256"
+    jwt_issuer: str = "multi-agent-ai-analyst"
+    jwt_audience: str = "multi-agent-ai-analyst-web"
     access_token_expire_minutes: int = 30
     refresh_token_expire_days: int = 7
+    invite_expire_hours: int = Field(default=168, ge=1, le=720)
+    password_reset_expire_minutes: int = Field(default=60, ge=5, le=1440)
+
+    # Public self-service registration. Signing up creates an organization and
+    # signs the reader straight in — there is no confirmation step, so the
+    # product needs no email provider to be usable.
+    enable_public_signup: bool = True
+    # Origin the password-reset links point at — the browser app, not the API.
+    public_app_url: str = "http://localhost:3000"
+
+    # Email is optional and used only for password reset. "console" writes the
+    # link to the log instead of sending it; with no SMTP host configured the
+    # reset flow is simply unavailable and the UI hides it. Every major provider
+    # (Resend, Postmark, SES, Mailgun) speaks SMTP, so this stays vendor-neutral.
+    email_sender: Literal["console", "smtp"] = "console"
+    email_from_address: str = "no-reply@localhost"
+    email_from_name: str = "Multi-Agent AI Analyst"
+    smtp_host: str | None = None
+    smtp_port: int = Field(default=587, ge=1, le=65535)
+    smtp_username: str | None = None
+    smtp_password: SecretStr | None = None
+    smtp_use_tls: bool = True
+
+    @property
+    def password_reset_available(self) -> bool:
+        """Reset needs a way to deliver the link, which means real SMTP."""
+        return self.email_sender == "smtp" and bool(self.smtp_host)
 
     database_url: SecretStr | None = None
     analytics_database_url: SecretStr | None = None
@@ -102,6 +131,7 @@ class Settings(BaseSettings):
     langfuse_public_key: SecretStr | None = None
     langfuse_secret_key: SecretStr | None = None
     langfuse_base_url: str = "https://cloud.langfuse.com"
+    enable_langfuse_tracing: bool = False
 
     # Development normally refuses every remote endpoint. This is the escape
     # hatch for services that have no practical local stand-in on this machine
@@ -120,11 +150,28 @@ class Settings(BaseSettings):
     enable_web_search: bool = False
     enable_sql_agent: bool = False
     enable_code_execution: bool = False
-    enable_unauthenticated_demo_api: bool = False
-    demo_tenant_id: str = "demo"
-    demo_max_upload_bytes: int = Field(default=10_000_000, ge=1, le=10_000_000)
-    demo_max_concurrent_runs: int = Field(default=1, ge=1, le=4)
+
+    # Uploads. The byte cap bounds the request; the remaining three bound what
+    # a *small* request is allowed to become once decompressed, because DOCX and
+    # XLSX are ZIP containers and compress adversarially well.
+    max_upload_bytes: int = Field(default=10_000_000, ge=1)
+    max_extracted_characters: int = Field(default=2_000_000, ge=1_000)
+    max_archive_members: int = Field(default=2_000, ge=1)
+    max_archive_expansion_ratio: int = Field(default=120, ge=1)
+
+    # Durable queue. Redis holds the pending work; Postgres holds the truth.
     redis_url: SecretStr | None = None
+    job_max_attempts: int = Field(default=3, ge=1, le=10)
+    job_visibility_timeout_seconds: int = Field(default=900, ge=30)
+    worker_poll_interval_seconds: float = Field(default=1.0, gt=0, le=60)
+
+    rate_limit_enabled: bool = True
+    rate_limit_login_per_15min: int = Field(default=10, ge=1)
+    rate_limit_signup_per_hour: int = Field(default=5, ge=1)
+    rate_limit_email_per_hour: int = Field(default=5, ge=1)
+    rate_limit_runs_per_hour: int = Field(default=60, ge=1)
+    rate_limit_uploads_per_hour: int = Field(default=30, ge=1)
+    daily_run_quota_per_organization: int = Field(default=200, ge=1)
 
     @property
     def cors_origins(self) -> list[str]:
@@ -144,6 +191,13 @@ class Settings(BaseSettings):
 
     @model_validator(mode="after")
     def validate_environment_boundaries(self) -> "Settings":
+        if self.enable_langfuse_tracing and (
+            not _secret_value(self.langfuse_public_key)
+            or not _secret_value(self.langfuse_secret_key)
+        ):
+            raise ValueError(
+                "LANGFUSE_PUBLIC_KEY and LANGFUSE_SECRET_KEY are required when tracing is enabled"
+            )
         if self.app_env == "test":
             return self
 
@@ -220,8 +274,34 @@ class Settings(BaseSettings):
             raise ValueError("production OBJECT_STORAGE_REGION must be provider-specific")
         if self.enable_sql_agent and not _secret_value(self.analytics_database_url):
             raise ValueError("production ANALYTICS_DATABASE_URL is required when SQL is enabled")
-        if self.enable_unauthenticated_demo_api:
-            raise ValueError("production must not enable the unauthenticated demo API")
+        jwt_secret = _secret_value(self.jwt_secret_key)
+        if not jwt_secret or len(jwt_secret) < 32:
+            raise ValueError("production JWT_SECRET_KEY must contain at least 32 characters")
+
+        # Reset links are built from this, and it is also what the browser app
+        # is reached at, so a localhost or placeholder value is a real defect.
+        app_host = _hostname(self.public_app_url)
+        if (
+            not app_host
+            or app_host in _LOCAL_HOSTS
+            or "your-frontend" in self.public_app_url
+            or urlparse(self.public_app_url).scheme != "https"
+        ):
+            raise ValueError(
+                "production PUBLIC_APP_URL must be the HTTPS origin of the browser app"
+            )
+
+        # Email is optional: sign-up and sign-in never send one. But a half
+        # configured sender would accept reset requests and deliver nothing, so
+        # if SMTP is selected it has to be complete.
+        if self.email_sender == "smtp":
+            if not self.smtp_host:
+                raise ValueError("production SMTP_HOST is required when EMAIL_SENDER=smtp")
+            if (
+                "@" not in self.email_from_address
+                or self.email_from_address.endswith("@localhost")
+            ):
+                raise ValueError("production EMAIL_FROM_ADDRESS must be a deliverable address")
         return self
 
 
