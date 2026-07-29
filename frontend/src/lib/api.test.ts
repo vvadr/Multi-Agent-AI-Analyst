@@ -161,6 +161,23 @@ describe("createRun", () => {
     });
   });
 
+  it("reads a 503 as service availability, not as a bad document", async () => {
+    fetchMock.mockResolvedValue(
+      jsonResponse({ detail: "gemini: 429 RESOURCE_EXHAUSTED" }, 503, {
+        "X-Request-ID": "req-3",
+      }),
+    );
+
+    const error = await createRun("q").catch((caught: ApiError) => caught);
+
+    expect(error).toMatchObject({ status: 503, requestId: "req-3" });
+    expect((error as ApiError).message).toContain("unavailable right now");
+    expect((error as ApiError).message).toContain(
+      "not a problem with your documents",
+    );
+    expect((error as ApiError).message).not.toMatch(/gemini|RESOURCE_EXHAUSTED/i);
+  });
+
   it("never surfaces the backend detail string", async () => {
     fetchMock.mockResolvedValue(
       jsonResponse({ detail: "psycopg.OperationalError: password failed" }, 500),
@@ -288,6 +305,16 @@ describe("getReadiness", () => {
 describe("uploadDocument", () => {
   const file = () => new File(["hello"], "q3.txt", { type: "text/plain" });
 
+  /** Await the rejection of an upload, typed, so its copy can be inspected. */
+  async function rejectionOf(pending: Promise<unknown>): Promise<ApiError> {
+    const error = await pending.then(
+      () => null,
+      (reason: unknown) => reason as ApiError,
+    );
+    if (!error) throw new Error("expected the upload to reject");
+    return error;
+  }
+
   it("posts multipart form data and parses the 201 body", async () => {
     const pending = uploadDocument(file());
 
@@ -321,25 +348,74 @@ describe("uploadDocument", () => {
   it("maps an unsupported type (415) to safe copy and keeps the request id", async () => {
     const pending = uploadDocument(file());
 
-    FakeXhr.last.respond(415, JSON.stringify({ detail: "Only UTF-8 .txt" }), {
-      "X-Request-ID": "req-9",
-    });
+    FakeXhr.last.respond(
+      415,
+      JSON.stringify({ detail: "Supported formats: PDF, DOCX, XLSX, ..." }),
+      { "X-Request-ID": "req-9" },
+    );
 
     await expect(pending).rejects.toMatchObject({
       status: 415,
       requestId: "req-9",
-      message: "Only .txt files are supported.",
+      message:
+        "Unsupported file type. Choose a PDF, DOCX, XLSX, TXT, Markdown, CSV, TSV, JSON, or HTML file.",
     });
   });
 
-  it("maps an oversized upload (413) to safe copy", async () => {
+  it("maps an oversized upload (413) to the limit the UI states", async () => {
     const pending = uploadDocument(file());
     FakeXhr.last.respond(413, "{}");
 
     await expect(pending).rejects.toMatchObject({
       status: 413,
-      message: "That file is larger than the upload limit.",
+      message: "That file is larger than the 10 MB limit.",
     });
+  });
+
+  it("maps an unreadable document (422) to copy that never echoes the detail", async () => {
+    const pending = uploadDocument(file());
+    FakeXhr.last.respond(
+      422,
+      JSON.stringify({ detail: "Password-protected PDFs are not supported" }),
+    );
+
+    const error = await rejectionOf(pending);
+    expect(error.message).toContain("could not be read");
+    expect(error.message).toContain("password-protected PDFs are not supported");
+  });
+
+  it("maps 422 from a malformed PDF onto the same fixed copy", async () => {
+    const unreadable = uploadDocument(file());
+    FakeXhr.last.respond(
+      422,
+      JSON.stringify({ detail: "The document could not be read as valid content" }),
+    );
+    const first = await rejectionOf(unreadable);
+
+    const encrypted = uploadDocument(file());
+    FakeXhr.last.respond(
+      422,
+      JSON.stringify({ detail: "Password-protected PDFs are not supported" }),
+    );
+    const second = await rejectionOf(encrypted);
+
+    // One message for every extraction failure: the client must not imply
+    // which one occurred, and the backend detail is never read.
+    expect(first.message).toBe(second.message);
+  });
+
+  it("attributes a 503 to service availability rather than the file", async () => {
+    const pending = uploadDocument(file());
+    FakeXhr.last.respond(
+      503,
+      JSON.stringify({ detail: "Document services are temporarily unavailable" }),
+      { "X-Request-ID": "req-11" },
+    );
+
+    const error = await rejectionOf(pending);
+    expect(error.message).toContain("unavailable right now");
+    expect(error.message).toContain("not a problem with your file");
+    expect(error.message).not.toContain("temporarily");
   });
 
   it("rejects a success body that does not match the contract", async () => {

@@ -47,7 +47,16 @@ ruff check .
 ## Local infrastructure (Docker)
 
 Development mode runs against local Postgres, Qdrant, and MinIO. After Docker
-Desktop is installed and running, start the data services:
+Desktop is installed and running, create the gateway environment file once —
+Compose reads it before it validates anything, so a fresh clone fails with
+`env file ...\infra\litellm\litellm.env not found` until it exists:
+
+```powershell
+Copy-Item ..\infra\litellm\litellm.env.example ..\infra\litellm\litellm.env
+# Fill GEMINI_API_KEY and LITELLM_MASTER_KEY to match backend\.env.development.
+```
+
+Then start the data services:
 
 ```powershell
 docker compose -f ..\infra\docker-compose.yml up -d postgres qdrant minio createbuckets litellm

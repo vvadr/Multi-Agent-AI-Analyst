@@ -252,6 +252,48 @@ describe("AnalystWorkspace", () => {
     expect(screen.queryByText(/gemini|quota/i)).not.toBeInTheDocument();
   });
 
+  it("reads a 503 as service availability rather than a bad document", async () => {
+    fetchMock.mockResolvedValue(
+      jsonResponse({ detail: "gemini: 429 RESOURCE_EXHAUSTED" }, 503),
+    );
+    render(<AnalystWorkspace />);
+
+    await ask();
+
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent(/unavailable right now/i);
+    expect(alert).toHaveTextContent(/not a problem with your documents/i);
+    expect(alert).not.toHaveTextContent(/gemini|RESOURCE_EXHAUSTED/i);
+    expect(
+      screen.getByRole("button", { name: /try again/i }),
+    ).toBeInTheDocument();
+  });
+
+  it("tells the reader follow-ups can use earlier context, without a transcript", async () => {
+    routeBackend({ events: sseResponse([frame("completed")]) });
+    render(<AnalystWorkspace />);
+
+    const hint = screen.getByText(/follow-up questions can build on earlier/i);
+    expect(hint).toBeInTheDocument();
+    expect(screen.getByLabelText(/your question/i)).toHaveAttribute(
+      "aria-describedby",
+      hint.id,
+    );
+
+    await ask("And what about margin?");
+    await screen.findByText("Answer ready.");
+
+    // Recall is backend behaviour. The stored records are formatted
+    // "Earlier question: … / Earlier answer: …" — none of that may render,
+    // and there is no transcript surface to hold it.
+    expect(screen.queryByText(/earlier question:|earlier answer:/i))
+      .not.toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: /history|transcript/i }))
+      .not.toBeInTheDocument();
+    expect(screen.queryByRole("list", { name: /history|previous/i }))
+      .not.toBeInTheDocument();
+  });
+
   it("surfaces an unreachable backend when the run cannot be created", async () => {
     fetchMock.mockRejectedValue(new TypeError("Failed to fetch"));
     render(<AnalystWorkspace />);

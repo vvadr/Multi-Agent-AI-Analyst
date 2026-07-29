@@ -4,13 +4,15 @@
 # Qdrant, and MinIO (S3-compatible object storage). LiteLLM is optional and
 # proxies to Gemini because there is no local model-provider stand-in.
 #
+# Configuration lives in ONE file: backend/.env.development. Nothing here needs
+# a second env file — the optional gateway is off by default (see `litellm`).
+#
 # Two ways to use it:
 #   A) Data stores only + hot-reload backend on the host (recommended for dev):
-#        docker compose -f infra/docker-compose.yml up -d postgres qdrant minio createbuckets litellm
+#        docker compose -f infra/docker-compose.yml up -d
 #        cd backend; uvicorn app.main:app --reload --port 8000   # APP_ENV=development
-#      The host-run backend reaches the gateway on http://localhost:4000.
 #   B) Full stack in Docker (backend included):
-#        docker compose -f infra/docker-compose.yml up --build
+#        docker compose -f infra/docker-compose.yml --profile fullstack up --build
 services:
   postgres:
     image: postgres:16-alpine
@@ -60,19 +62,26 @@ services:
       exit 0;
       "
 
-  # OpenAI-compatible model gateway in front of Gemini. Reads GEMINI_API_KEY and
-  # LITELLM_MASTER_KEY from the isolated development environment. Stateless:
-  # no database is configured, so it stores nothing.
+  # OPTIONAL OpenAI-compatible model gateway in front of Gemini. Off by default:
+  # with LITELLM_BASE_URL blank the backend calls Gemini directly, so most
+  # setups never need this container. Start it deliberately with
+  #   docker compose -f infra/docker-compose.yml --profile gateway up -d litellm
+  # and set LITELLM_BASE_URL=http://localhost:4000 in backend/.env.development.
+  # Stateless: no database is configured, so it stores nothing.
   litellm:
+    profiles: ["gateway"]
     image: ghcr.io/berriai/litellm:v1.92.0
     command: ["--config", "/app/config.yaml", "--port", "4000"]
-    # Only the two variables the proxy actually needs — NOT the backend's env
-    # file. Passing that in would hand a model gateway the JWT signing key and
-    # storage credentials, and its DATABASE_URL makes LiteLLM exit 1 (it reads
-    # any ambient DATABASE_URL for Prisma and cannot parse `postgresql+psycopg`;
-    # an empty value fails too, so the variable must be absent entirely).
+    # Only the two variables the proxy needs — NOT the backend's env file.
+    # Passing that in would hand a model gateway the JWT signing key and storage
+    # credentials, and its DATABASE_URL makes LiteLLM exit 1 (it reads any
+    # ambient DATABASE_URL for Prisma and cannot parse `postgresql+psycopg`; an
+    # empty value fails too, so the variable must be absent entirely).
+    # `required: false` so a checkout without this file still validates and the
+    # other services still start.
     env_file:
-      - ./litellm/litellm.env
+      - path: ./litellm/litellm.env
+        required: false
     volumes:
       - ./litellm/config.yaml:/app/config.yaml:ro
     ports:
@@ -87,7 +96,10 @@ services:
       retries: 5
       start_period: 20s
 
+  # The backend in a container. Also opt-in: day-to-day development runs it on
+  # the host with `uvicorn --reload`, against the data stores below.
   api:
+    profiles: ["fullstack"]
     build:
       context: ../backend
     env_file:
@@ -112,8 +124,6 @@ services:
         condition: service_started
       minio:
         condition: service_started
-      litellm:
-        condition: service_healthy
 
 volumes:
   postgres_data:

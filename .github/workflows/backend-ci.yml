@@ -51,6 +51,10 @@ jobs:
         working-directory: backend
         run: pip-audit
 
+      # Compose resolves `env_file` before it validates anything, and
+      # backend/.env.development is gitignored, so seed it from the committed
+      # template. Placeholder values are enough for `config`, which checks
+      # structure and never contacts a service.
       - name: Validate Compose configuration
         run: |
           cp backend/.env.development.example backend/.env.development

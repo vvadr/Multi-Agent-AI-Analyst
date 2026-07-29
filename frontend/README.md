@@ -118,7 +118,7 @@ frontend/
 │   │   ├── analyst-workspace.tsx # Question form, SSE progress, answer
 │   │   ├── backend-status.tsx
 │   │   ├── citation-list.tsx     # Document / web / analytics sources
-│   │   ├── document-upload.tsx   # .txt validation, progress, indexed state
+│   │   ├── document-upload.tsx   # format/size validation, progress, indexed
 │   │   └── *.test.tsx
 │   └── lib/
 │       ├── api.ts                # Typed API client — the only network layer
@@ -152,7 +152,7 @@ return 404 and the UI reports that the demo API is not being served.
 
 | Call | Used for |
 | --- | --- |
-| `POST /v1/documents` | Multipart `.txt` upload. Indexing is **synchronous**: a 201 means the file is already chunked, embedded, and searchable, so there is nothing to poll. |
+| `POST /v1/documents` | Multipart document upload. Indexing is **synchronous**: a 201 means the file is already chunked, embedded, and searchable, so there is nothing to poll. |
 | `POST /v1/runs` | Starts a run; returns 202 with the run id. |
 | `GET /v1/runs/{id}/events` | Typed SSE progress: `run_started`, `routing`, `retrieving`, `querying`, `generating`, `completed`, `failed`. |
 | `GET /v1/runs/{id}` | Final status, grounded answer, and citations. |
@@ -172,9 +172,37 @@ Three rules keep model- and provider-controlled text out of the page:
   `javascript:` source cannot produce an anchor. Web citations are labelled as
   external and open with `rel="noopener noreferrer"`.
 
-Client-side upload validation (`.txt`, non-empty, ≤ 1 MB) is a convenience, not
-a control: the backend re-checks extension, size, encoding, and emptiness, and
-the limit here tracks its `DEMO_MAX_UPLOAD_BYTES` default.
+### Document uploads
+
+| Rule | Value |
+| --- | --- |
+| Maximum size | **10 MB** (tracks the backend `DEMO_MAX_UPLOAD_BYTES` default) |
+| Supported extensions | `.pdf` `.docx` `.xlsx` `.txt` `.md` `.csv` `.tsv` `.json` `.html` `.htm` |
+| Not supported | Password-protected PDFs, scanned PDFs with no selectable text, and legacy `.doc` / `.xls` / `.ppt` — save those as `.docx`, `.xlsx`, or PDF first |
+
+Client-side validation checks the **extension, the byte length, and emptiness**
+only, and is a convenience rather than a control: the backend re-checks the
+extension and size and then parses the actual bytes, and its answer is
+authoritative. The browser's reported MIME type is deliberately not used as a
+gate — it is unreliable across platforms (Windows reports `.csv` as
+`application/vnd.ms-excel`, `.md` is often blank) and attacker-controlled, so
+rejecting on it would refuse valid files without adding a real check.
+
+Backend rejections map onto fixed local copy: 413 names the 10 MB limit, 415
+names the supported formats, and **422 covers every extraction failure with one
+message** — a malformed PDF, a broken Office archive, an encrypted PDF, and a
+document with no extractable text are indistinguishable to the reader, because
+the backend `detail` is never rendered. A **503 on upload or on a run means the
+backend or a provider is unavailable, not that the document is invalid**, and
+the copy says so.
+
+### Follow-up questions
+
+The backend recalls earlier completed question/answer pairs on its own, so a
+follow-up does not have to restate context. The form hint says this in one
+sentence. There is deliberately **no transcript, chat history, or stored-memory
+view** — recall is backend behaviour the reader should know about, not a
+surface, and raw memory records never reach the page.
 
 Cancelling a run stops the client following it; the run may still finish on the
 server, and the UI says so rather than claiming it was aborted.
