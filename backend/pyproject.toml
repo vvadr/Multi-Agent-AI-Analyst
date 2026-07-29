@@ -27,7 +27,7 @@ dependencies = [
 dev = [
     "pip-audit>=2.9,<3.0",
     "pytest>=9.0.3,<10.0",
-    "pytest-cov>=6.0,<7.0",
+    "pytest-cov>=6.0,<8.0",
     "ruff>=0.9,<1.0",
 ]
 
