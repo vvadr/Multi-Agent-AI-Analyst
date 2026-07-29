@@ -18,7 +18,7 @@ class Verdict:
 
 def review_answer(state: AgentState, *, generate: TextGenerator) -> Verdict:
     """Ask the model to check support, never returning raw model output to clients."""
-    source_parts = state["documents"] + (
+    source_parts = state["memory"] + state["documents"] + (
         [state["sql_result"]] if state["sql_result"] else []
     )
     evidence = "\n\n".join(source_parts)

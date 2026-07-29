@@ -71,3 +71,30 @@ def test_graph_can_route_a_numeric_question_to_the_approved_sql_agent() -> None:
 
     assert "data(sql)" in state["steps"]
     assert state["citations"][0]["kind"] == "analytics"
+
+
+def test_graph_includes_recalled_memory_in_generation_context() -> None:
+    prompts: list[str] = []
+
+    def generate(prompt: str) -> str:
+        prompts.append(prompt)
+        if "You route" in prompt:
+            return '{"next":"finish"}'
+        if "Return JSON only" in prompt:
+            return '{"ok":true,"reason":"Supported"}'
+        return "The earlier answer is still relevant."
+
+    run_workflow(
+        "What about that?",
+        dependencies=WorkflowDependencies(
+            generate=generate,
+            search_documents=lambda **_kwargs: [],
+            search_web=lambda **_kwargs: [],
+            execute_sql=None,
+            tenant_id="demo",
+            max_steps=8,
+            recall_memory=lambda _question, _limit: ["Earlier answer: sustainability"],
+        ),
+    )
+
+    assert any("Earlier answer: sustainability" in prompt for prompt in prompts)

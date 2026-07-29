@@ -92,3 +92,21 @@ alembic upgrade head
 
 The graph enforces run, step, and revision bounds. It deliberately does not
 execute model-written Python; that feature requires a separate sandbox.
+
+## Phase 4 memory and evaluation
+
+Completed local-demo runs are embedded into a separate, tenant-filtered memory
+collection and recalled for follow-up questions. The fixed ten-case evaluation
+dataset reports answer-term recall, citation coverage, and an LLM-judge score:
+
+```powershell
+python -m app.evaluation.cli
+```
+
+For the optional RAGAS metrics, install the evaluation extra and append
+`--ragas` to that command.
+
+The document endpoint accepts files up to 10 MB in PDF, DOCX, XLSX, TXT,
+Markdown, CSV, TSV, JSON, and HTML formats. It extracts text server-side;
+password-protected PDFs and legacy binary Office formats are intentionally
+rejected.

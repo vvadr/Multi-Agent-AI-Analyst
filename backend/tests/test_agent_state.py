@@ -16,6 +16,7 @@ def test_new_agent_state_is_complete_and_isolated() -> None:
         "steps": [],
         "revisions": 0,
         "citations": [],
+        "memory": [],
     }
 
 

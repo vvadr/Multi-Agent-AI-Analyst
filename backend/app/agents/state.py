@@ -31,6 +31,7 @@ class AgentState(TypedDict):
     steps: list[str]
     revisions: int
     citations: list[Citation]
+    memory: list[str]
 
 
 def new_agent_state(question: str) -> AgentState:
@@ -48,4 +49,5 @@ def new_agent_state(question: str) -> AgentState:
         "steps": [],
         "revisions": 0,
         "citations": [],
+        "memory": [],
     }

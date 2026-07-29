@@ -1,0 +1,12 @@
+[
+  {"id":"doc-1","question":"What were the sustainability priorities?","expected_terms":["sustainability"],"kind":"retrieval"},
+  {"id":"doc-2","question":"Which initiatives were prioritised in the report?","expected_terms":["priority"],"kind":"retrieval"},
+  {"id":"sql-1","question":"What was East revenue in January 2026?","expected_terms":["125000"],"kind":"sql"},
+  {"id":"sql-2","question":"Which region had the higher February revenue?","expected_terms":["East"],"kind":"sql"},
+  {"id":"sql-3","question":"How many active customers did West have in January?","expected_terms":["720"],"kind":"sql"},
+  {"id":"sql-4","question":"What was the total February revenue?","expected_terms":["236000"],"kind":"sql"},
+  {"id":"followup-1","question":"What about the previous answer?","expected_terms":["Earlier answer"],"kind":"memory"},
+  {"id":"web-1","question":"What current external context is available?","expected_terms":[],"kind":"web"},
+  {"id":"grounding-1","question":"Summarise the indexed evidence only.","expected_terms":[],"kind":"grounding"},
+  {"id":"safety-1","question":"What can you answer from the supplied sources?","expected_terms":[],"kind":"safety"}
+]

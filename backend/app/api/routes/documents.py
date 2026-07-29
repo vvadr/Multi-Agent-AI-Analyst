@@ -8,6 +8,11 @@ from fastapi import APIRouter, File, HTTPException, UploadFile, status
 from pydantic import BaseModel
 
 from app.core.config import Settings, get_settings
+from app.ingestion.extraction import (
+    DocumentExtractionError,
+    extract_document_text,
+    is_supported_document,
+)
 from app.ingestion.factory import build_document_ingestion_service
 from app.services.object_storage import ObjectStorage
 
@@ -33,25 +38,27 @@ async def upload_document(file: UploadFile = UPLOAD_FILE) -> UploadedDocument:
     """Store and index one bounded UTF-8 text document for the local demo tenant."""
     settings = _demo_settings()
     filename = file.filename or ""
-    if not filename.lower().endswith(".txt"):
-        raise HTTPException(status_code=415, detail="Only UTF-8 .txt files are supported")
+    if not is_supported_document(filename):
+        raise HTTPException(
+            status_code=415,
+            detail="Supported formats: PDF, DOCX, XLSX, TXT, Markdown, CSV, TSV, JSON, and HTML",
+        )
     raw = await file.read(settings.demo_max_upload_bytes + 1)
     if len(raw) > settings.demo_max_upload_bytes:
         raise HTTPException(status_code=413, detail="The document exceeds the upload limit")
     try:
-        content = raw.decode("utf-8")
-    except UnicodeDecodeError as exc:
-        raise HTTPException(status_code=422, detail="The document must be UTF-8 text") from exc
-    if not content.strip():
-        raise HTTPException(status_code=422, detail="The document must not be empty")
+        content = extract_document_text(filename=filename, content=raw)
+    except DocumentExtractionError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
     document_id = uuid4()
     try:
-        ObjectStorage(settings).put_text(
+        ObjectStorage(settings).put_document(
             tenant_id=settings.demo_tenant_id,
             document_id=document_id,
             filename=filename,
             content=raw,
+            content_type=file.content_type or "application/octet-stream",
         )
         chunks = build_document_ingestion_service(settings).ingest_text(
             tenant_id=settings.demo_tenant_id,

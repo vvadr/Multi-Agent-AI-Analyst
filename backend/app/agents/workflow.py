@@ -16,6 +16,7 @@ from app.services.safe_sql import SqlQueryResult
 TextGenerator = Callable[[str], str]
 SqlExecutor = Callable[[str], SqlQueryResult]
 EventSink = Callable[[str, dict[str, object]], None]
+MemoryRecall = Callable[[str, int], list[str]]
 
 
 @dataclass(frozen=True)
@@ -28,6 +29,7 @@ class WorkflowDependencies:
     max_steps: int
     max_revisions: int = 1
     web_enabled: bool = False
+    recall_memory: MemoryRecall | None = None
 
 
 def run_workflow(
@@ -37,9 +39,17 @@ def run_workflow(
     emit: EventSink | None = None,
 ) -> AgentState:
     """Run the bounded graph and return only its final public state."""
+    state = new_agent_state(question)
+    if dependencies.recall_memory:
+        try:
+            state["memory"] = dependencies.recall_memory(state["question"], 3)
+        except Exception:
+            # Memory improves follow-ups but must not make an otherwise healthy
+            # local analyst run unavailable.
+            state["memory"] = []
     graph = _build_graph(dependencies, emit=emit)
     return graph.invoke(
-        new_agent_state(question),
+        state,
         config={"recursion_limit": max(8, dependencies.max_steps * 4)},
     )
 
@@ -78,7 +88,9 @@ def _build_graph(deps: WorkflowDependencies, *, emit: EventSink | None):
     def generate_answer(state: AgentState) -> dict[str, object]:
         publish("generating")
         evidence = "\n\n".join(
-            state["documents"] + ([state["sql_result"]] if state["sql_result"] else [])
+            state["memory"]
+            + state["documents"]
+            + ([state["sql_result"]] if state["sql_result"] else [])
         )
         prompt = (
             "Answer the question using only the supplied reference material. "

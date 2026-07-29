@@ -31,14 +31,22 @@ class ObjectStorage:
             ),
         )
 
-    def put_text(self, *, tenant_id: str, document_id: UUID, filename: str, content: bytes) -> str:
-        """Store a plain-text upload under a server-owned, non-user-controlled key."""
+    def put_document(
+        self,
+        *,
+        tenant_id: str,
+        document_id: UUID,
+        filename: str,
+        content: bytes,
+        content_type: str,
+    ) -> str:
+        """Store an upload under a server-owned, non-user-controlled key."""
         safe_name = "".join(char for char in filename if char.isalnum() or char in ".-_")
         key = f"{tenant_id}/{document_id}/{safe_name or 'document.txt'}"
         self.client.put_object(
             Bucket=self.bucket,
             Key=key,
             Body=content,
-            ContentType="text/plain; charset=utf-8",
+            ContentType=content_type,
         )
         return key

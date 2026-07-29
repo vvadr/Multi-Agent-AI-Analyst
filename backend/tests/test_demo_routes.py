@@ -18,7 +18,7 @@ def _demo_settings() -> Settings:
     )
 
 
-def test_document_endpoint_rejects_non_text_uploads(monkeypatch) -> None:
+def test_document_endpoint_rejects_malformed_pdf(monkeypatch) -> None:
     monkeypatch.setattr(documents, "get_settings", _demo_settings)
 
     response = client.post(
@@ -26,8 +26,8 @@ def test_document_endpoint_rejects_non_text_uploads(monkeypatch) -> None:
         files={"file": ("report.pdf", b"not a PDF", "application/pdf")},
     )
 
-    assert response.status_code == 415
-    assert response.json()["detail"] == "Only UTF-8 .txt files are supported"
+    assert response.status_code == 422
+    assert response.json()["detail"] == "The document could not be read as valid content"
 
 
 def test_run_endpoint_uses_the_local_demo_store(monkeypatch) -> None:
@@ -45,3 +45,15 @@ def test_run_endpoint_uses_the_local_demo_store(monkeypatch) -> None:
 
     assert response.status_code == 202
     assert response.json() == {"id": str(demo_run.id), "status": "queued"}
+
+
+def test_document_endpoint_enforces_configured_upload_limit(monkeypatch) -> None:
+    settings = _demo_settings().model_copy(update={"demo_max_upload_bytes": 3})
+    monkeypatch.setattr(documents, "get_settings", lambda: settings)
+
+    response = client.post(
+        "/v1/documents",
+        files={"file": ("report.txt", b"four", "text/plain")},
+    )
+
+    assert response.status_code == 413

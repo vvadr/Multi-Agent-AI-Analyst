@@ -122,7 +122,7 @@ class Settings(BaseSettings):
     enable_code_execution: bool = False
     enable_unauthenticated_demo_api: bool = False
     demo_tenant_id: str = "demo"
-    demo_max_upload_bytes: int = Field(default=1_000_000, ge=1, le=10_000_000)
+    demo_max_upload_bytes: int = Field(default=10_000_000, ge=1, le=10_000_000)
     demo_max_concurrent_runs: int = Field(default=1, ge=1, le=4)
     redis_url: SecretStr | None = None
 

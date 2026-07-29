@@ -13,6 +13,7 @@ from app.agents.workflow import WorkflowDependencies, run_workflow
 from app.core.config import Settings
 from app.ingestion.factory import build_document_ingestion_service
 from app.services.generation import build_text_generator
+from app.services.memory import ConversationMemory
 from app.services.safe_sql import SafeSqlExecutor
 from app.services.web_search import TavilyWebSearch
 
@@ -91,6 +92,7 @@ class DemoRunStore:
         try:
             settings = self.settings
             ingestion = build_document_ingestion_service(settings)
+            memory = ConversationMemory(settings)
             sql_executor = SafeSqlExecutor(settings).execute if settings.enable_sql_agent else None
             state = run_workflow(
                 run.question,
@@ -103,6 +105,7 @@ class DemoRunStore:
                     max_steps=settings.max_agent_steps,
                     max_revisions=settings.max_agent_revisions,
                     web_enabled=settings.enable_web_search and bool(settings.tavily_api_key),
+                    recall_memory=memory.recall,
                 ),
                 emit=emit,
             )
@@ -124,6 +127,16 @@ class DemoRunStore:
                 )
             )
             self._lock.notify_all()
+        try:
+            memory.remember(
+                tenant_id=self.settings.demo_tenant_id,
+                question=run.question,
+                answer=state["answer"],
+            )
+        except Exception:
+            # Persisted memory is best-effort in the local demo; the completed
+            # answer remains valid when a provider or vector service is busy.
+            pass
 
 
 def _sse(event: DemoEvent) -> str:
