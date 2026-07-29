@@ -37,6 +37,9 @@ npm run start      # serve the production build
 CI runs `npm ci`, `npm run lint`, `npm run typecheck`, `npm test`, and
 `npm run build` on every pull request.
 
+Work on the `staging` branch and push there — never to `main`. See
+[`../docs/BRANCHING.md`](../docs/BRANCHING.md).
+
 ## Environment variables
 
 **Every `NEXT_PUBLIC_*` value is public.** Next.js inlines these into the

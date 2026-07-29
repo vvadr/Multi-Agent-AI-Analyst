@@ -79,8 +79,9 @@ Never copy production values into `.env.development`.
 
 ## Branch mapping
 
-- `main` → production.
-- `develop` → preview/staging.
+- `main` → production. Never pushed to directly; changed only by PR from
+  `staging`.
+- `staging` → preview/staging. **This is the branch you work on and push to.**
 - Feature branches → pull-request validation.
 
 See [BRANCHING.md](BRANCHING.md) and
