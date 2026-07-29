@@ -16,6 +16,31 @@ Real files are ignored. Development refuses remote PostgreSQL, Qdrant, object
 storage, Redis, and LiteLLM endpoints, preventing accidental access to
 production data.
 
+## Invite-only authentication
+
+The backend uses Argon2 password hashing, short-lived signed access tokens,
+and rotated opaque refresh sessions. Refresh tokens are sent only in an
+HttpOnly cookie; the frontend keeps an access token in memory and sends it as
+`Authorization: Bearer <token>`.
+
+There is no public registration endpoint. Apply the migrations, then create the
+first organization administrator from a protected terminal or deployment job:
+
+```powershell
+$env:BOOTSTRAP_ADMIN_PASSWORD = "use-a-long-unique-password"
+python -m app.auth.bootstrap `
+  --email admin@example.com `
+  --name "Pilot Admin" `
+  --organization "Example Organization" `
+  --password-env BOOTSTRAP_ADMIN_PASSWORD
+Remove-Item Env:BOOTSTRAP_ADMIN_PASSWORD
+```
+
+Remove the bootstrap password from the deployment environment immediately after
+the administrator exists. Organization administrators create one-time invites
+through `POST /v1/auth/invites`; only the returned invite token is delivered to
+the intended recipient.
+
 ## Run locally
 
 ```powershell
@@ -110,3 +135,11 @@ The document endpoint accepts files up to 10 MB in PDF, DOCX, XLSX, TXT,
 Markdown, CSV, TSV, JSON, and HTML formats. It extracts text server-side;
 password-protected PDFs and legacy binary Office formats are intentionally
 rejected.
+
+## Phase 5 observability and deployment
+
+Set `ENABLE_LANGFUSE_TRACING=true` with server-only `LANGFUSE_PUBLIC_KEY` and
+`LANGFUSE_SECRET_KEY` to trace development-demo workflows. Traces include the
+workflow path, tool names, model name, token use, and character counts; prompts,
+evidence, answers, SQL, and credentials are never sent to Langfuse. See the
+deployment runbook for the Render/Vercel release gate.

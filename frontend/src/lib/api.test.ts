@@ -140,7 +140,7 @@ describe("createRun", () => {
 
   it("maps a busy backend (429) to safe copy", async () => {
     fetchMock.mockResolvedValue(
-      jsonResponse({ detail: "the local demo is busy" }, 429, {
+      jsonResponse({ detail: "the workspace is busy" }, 429, {
         "X-Request-ID": "req-1",
       }),
     );
@@ -148,16 +148,16 @@ describe("createRun", () => {
     await expect(createRun("q")).rejects.toMatchObject({
       status: 429,
       requestId: "req-1",
-      message: "The demo is already running an analysis. Try again in a moment.",
+      message: "An analysis is already running. Try again in a moment.",
     });
   });
 
-  it("maps a disabled demo API (404) to safe copy", async () => {
+  it("maps an unserved runs endpoint (404) to safe copy", async () => {
     fetchMock.mockResolvedValue(jsonResponse({ detail: "Not found" }, 404));
 
     await expect(createRun("q")).rejects.toMatchObject({
       status: 404,
-      message: "This backend is not serving the local demo API.",
+      message: "That analysis service is not available on this backend.",
     });
   });
 
@@ -315,7 +315,7 @@ describe("uploadDocument", () => {
     return error;
   }
 
-  it("posts multipart form data and parses the 201 body", async () => {
+  it("posts multipart form data and parses the accepted body", async () => {
     const pending = uploadDocument(file());
 
     const xhr = FakeXhr.last;
@@ -324,12 +324,21 @@ describe("uploadDocument", () => {
     expect(xhr.body).toBeInstanceOf(FormData);
     expect((xhr.body as FormData).get("file")).toBeInstanceOf(File);
 
-    xhr.respond(201, JSON.stringify({ id: "doc-1", filename: "q3.txt", chunks: 12 }));
+    xhr.respond(
+      202,
+      JSON.stringify({
+        id: "doc-1",
+        filename: "q3.txt",
+        chunks: 0,
+        status: "pending",
+      }),
+    );
 
     await expect(pending).resolves.toEqual({
       id: "doc-1",
       filename: "q3.txt",
-      chunks: 12,
+      chunks: 0,
+      status: "pending",
     });
   });
 
@@ -537,6 +546,66 @@ describe("streamRunEvents", () => {
       requestId: "req-4",
       message: "The run event stream could not be opened.",
     });
+  });
+
+  it("reconnects after a dropped connection and resumes from the last event id", async () => {
+    /**
+     * Delivers its frames, then dies the way a lost connection does.
+     *
+     * The fault is raised on the *second* pull rather than alongside the
+     * enqueue: `controller.error()` discards anything still queued, so erroring
+     * eagerly would mean the frames were never readable at all.
+     */
+    const droppedAfter = (frames: string[]): Response => {
+      const encoder = new TextEncoder();
+      let delivered = false;
+      return new Response(
+        new ReadableStream<Uint8Array>({
+          pull(controller) {
+            if (!delivered) {
+              delivered = true;
+              for (const frame of frames) controller.enqueue(encoder.encode(frame));
+              return;
+            }
+            controller.error(new Error("connection reset"));
+          },
+        }),
+      );
+    };
+
+    fetchMock
+      .mockResolvedValueOnce(
+        droppedAfter(['id: 1\nevent: run_started\ndata: {"run_id":"run-1"}\n\n']),
+      )
+      .mockResolvedValueOnce(
+        sseResponse(['id: 2\nevent: completed\ndata: {"citation_count":1}\n\n']),
+      );
+
+    const events: RunEvent[] = [];
+    await new Promise<void>((resolve) => {
+      streamRunEvents("run-1", {
+        onEvent: (event) => events.push(event),
+        onError: () => resolve(),
+        onClose: () => resolve(),
+      });
+    });
+
+    // The reconnect resumed rather than replaying: `run_started` appears once.
+    expect(events.map((event) => event.type)).toEqual(["run_started", "completed"]);
+    const resumed = fetchMock.mock.calls[fetchMock.mock.calls.length - 1][1] as
+      | RequestInit
+      | undefined;
+    expect(
+      (resumed?.headers as Record<string, string> | undefined)?.["Last-Event-ID"],
+    ).toBe("1");
+  });
+
+  it("does not retry a stream the backend refuses outright", async () => {
+    // A 404 run will not exist on the next attempt either.
+    const { error } = await collect(new Response("", { status: 404 }));
+
+    expect(error?.status).toBe(404);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
   it("stays silent when the caller aborts", async () => {

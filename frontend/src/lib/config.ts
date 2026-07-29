@@ -50,6 +50,7 @@ export interface RawPublicConfig {
   apiBaseUrl?: string;
   apiV1Prefix?: string;
   appEnv?: string;
+  passwordResetEnabled?: string;
 }
 
 export interface PublicConfig {
@@ -57,6 +58,15 @@ export interface PublicConfig {
   apiV1Prefix: string;
   appEnv: AppEnv;
   isProduction: boolean;
+  /**
+   * Whether the backend can deliver a reset link.
+   *
+   * Registration and sign-in need no email provider, so a deployment may
+   * legitimately have none — in which case the reset endpoint answers 503 and
+   * the UI must not offer the option. Off unless explicitly enabled, so the
+   * failure mode is a missing link rather than a dead one.
+   */
+  passwordResetEnabled: boolean;
 }
 
 /**
@@ -165,6 +175,7 @@ export function resolvePublicConfig(raw: RawPublicConfig): PublicConfig {
     apiV1Prefix: normalizeApiPrefix(raw.apiV1Prefix),
     appEnv,
     isProduction: appEnv === "production",
+    passwordResetEnabled: raw.passwordResetEnabled?.trim() === "true",
   };
 }
 
@@ -173,12 +184,14 @@ const config = resolvePublicConfig({
   apiBaseUrl: process.env.NEXT_PUBLIC_API_BASE_URL,
   apiV1Prefix: process.env.NEXT_PUBLIC_API_V1_PREFIX,
   appEnv: process.env.NEXT_PUBLIC_APP_ENV,
+  passwordResetEnabled: process.env.NEXT_PUBLIC_ENABLE_PASSWORD_RESET,
 });
 
 export const API_BASE_URL = config.apiBaseUrl;
 export const API_V1_PREFIX = config.apiV1Prefix;
 export const APP_ENV = config.appEnv;
 export const IS_PRODUCTION = config.isProduction;
+export const PASSWORD_RESET_ENABLED = config.passwordResetEnabled;
 
 /** Absolute URL for a versioned (`/v1/...`) endpoint. */
 export function apiV1Url(path: string): string {

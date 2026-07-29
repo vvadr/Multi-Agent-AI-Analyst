@@ -13,6 +13,8 @@ export interface SseFrame {
   event?: string;
   /** Concatenated `data:` lines, joined with newlines. */
   data: string;
+  /** The `id:` field, which the client echoes back as `Last-Event-ID`. */
+  id?: string;
 }
 
 export interface SseParseResult {
@@ -49,6 +51,7 @@ export function parseSseBuffer(buffer: string): SseParseResult {
 
 function parseFrame(raw: string): SseFrame | null {
   let event: string | undefined;
+  let id: string | undefined;
   const data: string[] = [];
 
   for (const line of raw.split("\n")) {
@@ -63,8 +66,9 @@ function parseFrame(raw: string): SseFrame | null {
 
     if (field === "event") event = value.trim();
     else if (field === "data") data.push(value);
+    else if (field === "id") id = value.trim();
   }
 
-  if (event === undefined && data.length === 0) return null;
-  return { event, data: data.join("\n") };
+  if (event === undefined && data.length === 0 && id === undefined) return null;
+  return { event, data: data.join("\n"), id };
 }

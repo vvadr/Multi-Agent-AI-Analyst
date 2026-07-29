@@ -22,18 +22,27 @@ type UploadState =
   | { kind: "error"; message: string; requestId?: string };
 
 /**
- * Upload one supported document into the local demo tenant.
+ * Upload one supported document into the signed-in user's workspace.
  *
  * Indexing is synchronous on the backend: the 201 response already means the
  * file is chunked, embedded, and searchable, so there is nothing to poll. The
  * gap between "bytes sent" and "response received" is where indexing happens,
  * and it is reported as its own step.
  */
-export function DocumentUpload() {
+export function DocumentUpload({
+  onUploaded,
+}: {
+  /** Called once an upload is accepted, so the list can pick it up. */
+  onUploaded?: () => void;
+} = {}) {
   const [state, setState] = useState<UploadState>({ kind: "idle" });
   const inputRef = useRef<HTMLInputElement>(null);
   const abortRef = useRef<AbortController | null>(null);
   const mountedRef = useRef(true);
+  // Held in a ref so an inline callback from the parent does not rebuild the
+  // upload handler on every render.
+  const onUploadedRef = useRef(onUploaded);
+  onUploadedRef.current = onUploaded;
 
   useEffect(() => {
     mountedRef.current = true;
@@ -83,6 +92,7 @@ export function DocumentUpload() {
       if (!mountedRef.current) return;
       if (inputRef.current) inputRef.current.value = "";
       setState({ kind: "indexed", document });
+      onUploadedRef.current?.();
     } catch (error) {
       if (!mountedRef.current || controller.signal.aborted) return;
       const apiError =

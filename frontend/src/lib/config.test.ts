@@ -112,12 +112,14 @@ describe("resolvePublicConfig", () => {
         apiBaseUrl: "https://api.example.invalid/",
         apiV1Prefix: "v1/",
         appEnv: "production",
+        passwordResetEnabled: "true",
       }),
     ).toEqual({
       apiBaseUrl: "https://api.example.invalid",
       apiV1Prefix: "/v1",
       appEnv: "production",
       isProduction: true,
+      passwordResetEnabled: true,
     });
   });
 
@@ -127,6 +129,17 @@ describe("resolvePublicConfig", () => {
       apiV1Prefix: "/v1",
       appEnv: "development",
       isProduction: false,
+      // Off unless explicitly enabled: the failure mode should be a missing
+      // link, not one that leads to an endpoint answering 503.
+      passwordResetEnabled: false,
     });
+  });
+
+  it("treats any value other than the literal 'true' as disabled", () => {
+    for (const raw of ["false", "1", "yes", "TRUE", " "]) {
+      expect(resolvePublicConfig({ passwordResetEnabled: raw }).passwordResetEnabled).toBe(
+        false,
+      );
+    }
   });
 });

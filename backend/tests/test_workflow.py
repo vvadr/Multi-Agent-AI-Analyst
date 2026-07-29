@@ -1,5 +1,6 @@
 from app.agents.workflow import WorkflowDependencies, run_workflow
 from app.ingestion.service import SearchResult
+from app.services.observability import NoopObservability
 from app.services.safe_sql import SqlQueryResult
 from app.services.web_search import WebSearchResult
 
@@ -98,3 +99,49 @@ def test_graph_includes_recalled_memory_in_generation_context() -> None:
     )
 
     assert any("Earlier answer: sustainability" in prompt for prompt in prompts)
+
+
+class _RecordedObservability(NoopObservability):
+    def __init__(self) -> None:
+        self.spans: list[tuple[str, str]] = []
+
+    def span(self, name: str, *, kind: str = "span"):
+        parent = self
+
+        class _Span:
+            def __enter__(self):
+                parent.spans.append((name, kind))
+
+            def __exit__(self, *_args: object) -> None:
+                return None
+
+        return _Span()
+
+
+def test_workflow_records_safe_named_agent_and_tool_spans() -> None:
+    observability = _RecordedObservability()
+
+    run_workflow(
+        "What was a priority?",
+        dependencies=WorkflowDependencies(
+            generate=lambda _prompt: '{"next":"finish"}'
+            if "You route" in _prompt
+            else '{"ok":true,"reason":"Supported"}'
+            if "Return JSON only" in _prompt
+            else "Sustainability was a priority.",
+            search_documents=lambda **_kwargs: [],
+            search_web=lambda **_kwargs: [],
+            execute_sql=None,
+            tenant_id="demo",
+            max_steps=8,
+            recall_memory=lambda _question, _limit: [],
+            observability=observability,
+        ),
+    )
+
+    assert observability.spans == [
+        ("memory-recall", "tool"),
+        ("supervisor", "agent"),
+        ("answer-generation", "chain"),
+        ("critic", "evaluator"),
+    ]

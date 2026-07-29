@@ -106,8 +106,12 @@ Initial endpoints:
 
 | Method | Endpoint | Purpose |
 | --- | --- | --- |
-| `POST` | `/v1/auth/register` | Create a local account. |
-| `POST` | `/v1/auth/login` | Obtain a short-lived access token and refresh token. |
+| `POST` | `/v1/auth/login` | Obtain a short-lived access token and set a rotated refresh cookie. |
+| `POST` | `/v1/auth/refresh` | Rotate the refresh session and obtain a new access token. |
+| `POST` | `/v1/auth/logout` | Revoke the current refresh session. |
+| `GET` | `/v1/auth/me` | Retrieve the authenticated user and organization. |
+| `POST` | `/v1/auth/invites` | Invite a user to the authenticated administrator's organization. |
+| `POST` | `/v1/auth/invites/accept` | Accept an invite and create or join an account. |
 | `POST` | `/v1/documents` | Upload an authorised document. |
 | `GET` | `/v1/documents/{id}` | Read document/indexing status. |
 | `POST` | `/v1/conversations` | Create a conversation. |

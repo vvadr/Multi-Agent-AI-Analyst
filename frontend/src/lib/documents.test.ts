@@ -154,10 +154,30 @@ describe("validateDocumentFile", () => {
 });
 
 describe("parseUploadedDocument", () => {
-  it("parses the 201 body", () => {
+  it("parses the accepted-upload body", () => {
     expect(
-      parseUploadedDocument({ id: "doc-1", filename: "q3.pdf", chunks: 12 }),
-    ).toEqual({ id: "doc-1", filename: "q3.pdf", chunks: 12 });
+      parseUploadedDocument({
+        id: "doc-1",
+        filename: "q3.pdf",
+        chunks: 12,
+        status: "ready",
+      }),
+    ).toEqual({ id: "doc-1", filename: "q3.pdf", chunks: 12, status: "ready" });
+  });
+
+  it("treats an unrecognized status as still in flight", () => {
+    // Never "ready": a contract drift must not render an unindexed document as
+    // searchable.
+    expect(
+      parseUploadedDocument({ id: "doc-1", filename: "q3.pdf", chunks: 0, status: "wat" })
+        ?.status,
+    ).toBe("pending");
+  });
+
+  it("defaults a missing status to pending", () => {
+    expect(
+      parseUploadedDocument({ id: "doc-1", filename: "q3.pdf", chunks: 0 })?.status,
+    ).toBe("pending");
   });
 
   it("rejects a body with no id", () => {

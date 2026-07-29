@@ -107,11 +107,32 @@ def _probe_model(settings: Settings) -> None:
     response.raise_for_status()
 
 
+def _probe_queue(settings: Settings) -> None:
+    if not settings.redis_url:
+        # No Redis means the API runs an embedded worker over an in-process
+        # queue. There is nothing to reach, and it cannot be unreachable.
+        return
+    import redis
+
+    client = redis.Redis.from_url(
+        settings.redis_url.get_secret_value(),
+        socket_timeout=settings.service_probe_timeout_seconds,
+        socket_connect_timeout=settings.service_probe_timeout_seconds,
+    )
+    try:
+        client.ping()
+    finally:
+        client.close()
+
+
 _PROBES: dict[str, Callable[[Settings], None]] = {
     "database": _probe_database,
     "model": _probe_model,
     "qdrant": _probe_qdrant,
     "object_storage": _probe_object_storage,
+    # Uploads and runs are queued, so an unreachable queue means the product
+    # accepts work it cannot execute — that is not "ready".
+    "queue": _probe_queue,
 }
 
 
@@ -133,6 +154,8 @@ def _configured_components(settings: Settings) -> dict[str, bool]:
             and settings.object_storage_access_key_id
             and settings.object_storage_secret_access_key
         ),
+        # Always configured: either Redis is set, or the in-process queue is.
+        "queue": True,
     }
 
 

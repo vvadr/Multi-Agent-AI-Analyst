@@ -1,22 +1,41 @@
+# Render blueprint: one web service is enough.
+#
+# Runs and ingestion are queued, but without REDIS_URL the API executes them in
+# an embedded worker in its own process. Runs and documents are still durable
+# rows in PostgreSQL, and a restart still recovers work that was in flight, so
+# this is a scaling limit rather than a correctness one.
+#
+# To separate execution from the API — worth doing once the web service needs
+# more than one instance, or once provider latency starts crowding out request
+# handling — uncomment the worker and Redis blocks at the bottom. Nothing in the
+# application code changes; the queue implementation switches on REDIS_URL.
 services:
   - type: web
     name: multi-agent-ai-analyst-api
     runtime: python
     rootDir: backend
     buildCommand: python -m pip install --upgrade pip && python -m pip install .
+    # Migrations run here so exactly one service applies them. Scaling this
+    # service beyond one instance means moving this to a pre-deploy job —
+    # concurrent `alembic upgrade` is not safe.
     startCommand: alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port $PORT
     healthCheckPath: /healthz
-    envVars:
+    envVars: &backendEnv
       - key: APP_ENV
         value: production
       - key: LOG_LEVEL
         value: INFO
       - key: API_V1_PREFIX
         value: /v1
+      # The exact HTTPS origin of the browser app, no trailing slash.
       - key: ALLOWED_ORIGINS
-        sync: false
+        value: https://multi-agent-ai-analyst-psi.vercel.app
+      # The browser app again, not the API. Password-reset links are built from
+      # it; startup refuses a localhost or placeholder value.
+      - key: PUBLIC_APP_URL
+        value: https://multi-agent-ai-analyst-psi.vercel.app
       - key: JWT_SECRET_KEY
-        sync: false
+        generateValue: true
       - key: DATABASE_URL
         sync: false
       - key: GEMINI_API_KEY
@@ -41,9 +60,59 @@ services:
         sync: false
       - key: OBJECT_STORAGE_SECRET_ACCESS_KEY
         sync: false
+      - key: ENABLE_PUBLIC_SIGNUP
+        value: "true"
+      # Email is used only for self-service password reset. Leaving this as
+      # "console" means the reset flow is unavailable and the UI hides it;
+      # everything else works without an email provider.
+      - key: EMAIL_SENDER
+        value: console
       - key: SERVICE_PROBE_TIMEOUT_SECONDS
         value: "3"
       - key: ENABLE_WEB_SEARCH
         value: "false"
       - key: ENABLE_CODE_EXECUTION
         value: "false"
+      - key: ENABLE_LANGFUSE_TRACING
+        value: "false"
+      - key: LANGFUSE_PUBLIC_KEY
+        sync: false
+      - key: LANGFUSE_SECRET_KEY
+        sync: false
+      - key: LANGFUSE_BASE_URL
+        value: https://cloud.langfuse.com
+
+  # ---------------------------------------------------------------------------
+  # Optional: move execution out of the API process.
+  #
+  # Uncomment both blocks together. The worker needs identical configuration —
+  # it talks to the same database, storage, and providers — and a worker missing
+  # a credential does not fail to start, it fails every job it claims. Deploy
+  # both services from the same commit; they share a schema.
+  # ---------------------------------------------------------------------------
+  #
+  # - type: worker
+  #   name: multi-agent-ai-analyst-worker
+  #   runtime: python
+  #   rootDir: backend
+  #   buildCommand: python -m pip install --upgrade pip && python -m pip install .
+  #   # No migration step: the web service owns the schema.
+  #   startCommand: python -m app.worker
+  #   envVars: *backendEnv
+  #
+  # - type: redis
+  #   name: multi-agent-ai-analyst-queue
+  #   # Jobs are dispatch, not state — PostgreSQL holds the record of work that
+  #   # still needs doing, and the worker re-enqueues anything stranded. A plan
+  #   # without persistence is therefore acceptable here.
+  #   plan: free
+  #   maxmemoryPolicy: noeviction
+  #   ipAllowList: []
+  #
+  # Then add REDIS_URL to `backendEnv` so both services resolve it:
+  #
+  #   - key: REDIS_URL
+  #     fromService:
+  #       type: redis
+  #       name: multi-agent-ai-analyst-queue
+  #       property: connectionString
