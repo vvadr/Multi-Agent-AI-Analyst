@@ -73,7 +73,7 @@ They are all public (`NEXT_PUBLIC_*`); there are no frontend secrets:
 NEXT_PUBLIC_API_BASE_URL   # the deployed Render backend URL
 NEXT_PUBLIC_API_V1_PREFIX  # /v1
 NEXT_PUBLIC_APP_ENV        # production
-NEXT_PUBLIC_ENABLE_PASSWORD_RESET  # false unless SMTP is configured
+NEXT_PUBLIC_ENABLE_ACCOUNT_RECOVERY  # false unless SMTP is configured
 ```
 
 After the frontend URL is known, add it to the backend's `ALLOWED_ORIGINS` and

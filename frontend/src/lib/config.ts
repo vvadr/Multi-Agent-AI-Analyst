@@ -184,7 +184,7 @@ const config = resolvePublicConfig({
   apiBaseUrl: process.env.NEXT_PUBLIC_API_BASE_URL,
   apiV1Prefix: process.env.NEXT_PUBLIC_API_V1_PREFIX,
   appEnv: process.env.NEXT_PUBLIC_APP_ENV,
-  passwordResetEnabled: process.env.NEXT_PUBLIC_ENABLE_PASSWORD_RESET,
+  passwordResetEnabled: process.env.NEXT_PUBLIC_ENABLE_ACCOUNT_RECOVERY,
 });
 
 export const API_BASE_URL = config.apiBaseUrl;
