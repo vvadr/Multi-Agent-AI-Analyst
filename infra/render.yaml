@@ -62,6 +62,11 @@ services:
         sync: false
       - key: ENABLE_PUBLIC_SIGNUP
         value: "true"
+      # Execute queued jobs in this process. Required whenever REDIS_URL is set
+      # without a separate worker service — otherwise work queues and nothing
+      # runs it. Harmless when there is no Redis, where it is the default.
+      - key: RUN_EMBEDDED_WORKER
+        value: "true"
       # Email is used only for self-service password reset. Leaving this as
       # "console" means the reset flow is unavailable and the UI hides it;
       # everything else works without an email provider.

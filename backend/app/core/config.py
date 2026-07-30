@@ -98,6 +98,13 @@ class Settings(BaseSettings):
     smtp_use_tls: bool = True
 
     @property
+    def embedded_worker_enabled(self) -> bool:
+        """Resolve `run_embedded_worker`, inferring it when unset."""
+        if self.run_embedded_worker is not None:
+            return self.run_embedded_worker
+        return self.redis_url is None
+
+    @property
     def password_reset_available(self) -> bool:
         """Reset needs a way to deliver the link, which means real SMTP."""
         return self.email_sender == "smtp" and bool(self.smtp_host)
@@ -161,6 +168,15 @@ class Settings(BaseSettings):
 
     # Durable queue. Redis holds the pending work; Postgres holds the truth.
     redis_url: SecretStr | None = None
+    # Whether the API process also executes queued jobs.
+    #
+    # Left unset it infers the answer: on when there is no Redis, because
+    # nothing else could possibly run the work; off when there is, because a
+    # separate worker service is the expected topology. Set it explicitly to
+    # keep a durable Redis queue while still executing in-process — which is
+    # the right shape for a single-service deployment that happens to have
+    # Redis available.
+    run_embedded_worker: bool | None = None
     job_max_attempts: int = Field(default=3, ge=1, le=10)
     job_visibility_timeout_seconds: int = Field(default=900, ge=30)
     worker_poll_interval_seconds: float = Field(default=1.0, gt=0, le=60)

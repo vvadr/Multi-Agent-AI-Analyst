@@ -17,7 +17,7 @@ logger = structlog.get_logger(__name__)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-    """Run an embedded worker when there is no external queue to hand work to.
+    """Run the worker inside the API process when nothing else will.
 
     Without `REDIS_URL` the whole product runs in one process: a developer needs
     no infrastructure, and a small deployment needs no second service. Runs and
@@ -25,8 +25,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     recovers anything a restart stranded — what is lost is the ability to scale
     the web tier, since each instance would then execute its own work.
 
-    Setting `REDIS_URL` moves execution to the separate worker service and this
-    branch goes quiet.
+    With `REDIS_URL` this stays off by default, because a separate worker
+    service is the expected topology. `RUN_EMBEDDED_WORKER=true` overrides that
+    to get a durable Redis queue with in-process execution.
     """
     settings = get_settings()
     worker = _start_embedded_worker(settings)
@@ -38,14 +39,27 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
 
 def _start_embedded_worker(settings: Settings):
-    if settings.redis_url or settings.app_env == "test":
+    if settings.app_env == "test":
         return None
+    if not settings.embedded_worker_enabled:
+        # Queued work will sit untouched unless a worker service is running, so
+        # say so once at startup rather than leaving it to be discovered as
+        # uploads that never finish indexing.
+        logger.info(
+            "embedded_worker_disabled",
+            note="a separate worker service must be running to execute queued jobs",
+        )
+        return None
+
     from app.worker import Worker
 
     worker = Worker(settings, get_job_queue())
     thread = threading.Thread(target=worker.run_forever, name="embedded-worker", daemon=True)
     thread.start()
-    logger.info("embedded_worker_started", reason="no REDIS_URL configured")
+    logger.info(
+        "embedded_worker_started",
+        queue="redis" if settings.redis_url else "in-process",
+    )
     return worker
 
 
