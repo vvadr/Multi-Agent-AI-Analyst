@@ -105,11 +105,11 @@ Important source files:
 | Area | Result | Release meaning |
 | --- | --- | --- |
 | Backend lint | Passed | Ruff reported no violations. |
-| Backend tests | 129 passed | Unit and route tests are green. |
-| Backend coverage | **81.33%** | Clears the configured CI gate of 80%. |
+| Backend tests | 182 passed | Unit, route, rate-limit, and security-middleware tests are green. |
+| Backend coverage | **81.75%** | Clears the configured CI gate of 80% (last coverage run). |
 | Frontend lint | Passed | ESLint is green. |
 | Frontend typecheck | Passed | TypeScript is green. |
-| Frontend tests | 395 passed | Vitest is green. |
+| Frontend tests | 394 passed | Vitest is green. |
 | Frontend production build | Passed | Builds with no network access to Google Fonts. |
 | Compose validation | Passed | `docker compose ... config --quiet` accepted the configuration. |
 | Container build | Not verified | Docker daemon access was unavailable in the audit environment. |
@@ -118,10 +118,8 @@ Important source files:
 | Full-history secret scan | Not verified locally | A Gitleaks workflow exists; it must pass on the release PR. |
 | Live Render health | Not verified after configuration changes | Earlier screenshots showed startup rejecting a placeholder `ALLOWED_ORIGINS`. |
 
-The frontend font failure may disappear on an internet-connected Vercel or CI
-builder, but a production build should not depend on a third-party font request
-being available. Self-hosting the fonts or using a system font stack is the
-more reliable fix.
+The frontend now builds without a third-party font request, so a production
+build is not dependent on Google Fonts availability.
 
 ## Release severity levels
 
@@ -499,6 +497,8 @@ APP_ENV=production
 API_V1_PREFIX=/v1
 LOG_LEVEL=INFO
 ALLOWED_ORIGINS=https://<actual-vercel-production-origin>
+ALLOWED_HOSTS=<actual-render-api-hostname>
+TRUST_PROXY_HEADERS=true
 JWT_SECRET_KEY=<generated-production-secret>
 DATABASE_URL=postgresql+psycopg://...
 GEMINI_API_KEY=<server-only-secret>
@@ -513,7 +513,6 @@ OBJECT_STORAGE_ENDPOINT=https://...
 OBJECT_STORAGE_REGION=<provider-region>
 OBJECT_STORAGE_ACCESS_KEY_ID=<server-only-secret>
 OBJECT_STORAGE_SECRET_ACCESS_KEY=<server-only-secret>
-ENABLE_UNAUTHENTICATED_DEMO_API=false
 ENABLE_CODE_EXECUTION=false
 ```
 
@@ -523,6 +522,9 @@ Important:
   `DBNAME` placeholder.
 - `ALLOWED_ORIGINS` must be the exact HTTPS origin, with no path and preferably
   no trailing slash.
+- `ALLOWED_HOSTS` must name only the public API hostname, without a scheme or
+  wildcard. Keep `TRUST_PROXY_HEADERS=true` only when the app is reachable
+  exclusively through Render's public proxy.
 - Many providers return `postgresql://...`; this project explicitly uses the
   Psycopg 3 driver, so normalize it to `postgresql+psycopg://...`.
 - Do not set `LITELLM_BASE_URL` in the initial production deployment.
@@ -539,7 +541,7 @@ LANGFUSE_PUBLIC_KEY=<server-only-secret>
 LANGFUSE_SECRET_KEY=<server-only-secret>
 LANGFUSE_BASE_URL=https://cloud.langfuse.com
 ENABLE_LANGFUSE_TRACING=false
-REDIS_URL=<when-the-durable-worker-is-implemented>
+REDIS_URL=<when-scaling-the-durable-worker>
 ```
 
 If SQL is enabled, the analytics URL must use a dedicated read-only role.

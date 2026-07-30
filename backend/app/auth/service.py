@@ -363,11 +363,27 @@ class AuthService:
                 RefreshSession.token_hash == hash_refresh_token(refresh_token)
             )
         )
-        if (
-            not session_record
-            or session_record.revoked_at
-            or _is_expired(session_record.expires_at)
-        ):
+        if not session_record:
+            raise AuthenticationError("invalid refresh session")
+
+        # A token that was already rotated away is being presented a second
+        # time. Refusing it is not enough on its own: if it leaked, whoever holds
+        # it also holds the successor it was exchanged for, and that successor
+        # still works. So the lineage it leads to is revoked before answering.
+        # A client that merely retried a refresh is signed out and can sign in
+        # again, which is the cheaper of the two mistakes to make here.
+        if session_record.revoked_at and session_record.replaced_by_session_id:
+            self._revoke_session_lineage(session_record)
+            self._audit(
+                event_type="auth.refresh_reuse_detected",
+                organization_id=session_record.organization_id,
+                actor_user_id=session_record.user_id,
+                target_id=session_record.id,
+            )
+            self.session.commit()
+            raise AuthenticationError("invalid refresh session")
+
+        if session_record.revoked_at or _is_expired(session_record.expires_at):
             raise AuthenticationError("invalid refresh session")
 
         user = self.session.get(User, session_record.user_id)
@@ -402,6 +418,29 @@ class AuthService:
         )
         self.session.commit()
         return issued
+
+    def _revoke_session_lineage(self, session_record: RefreshSession) -> int:
+        """Revoke a replayed session and every session descended from it.
+
+        Rotation makes each refresh session the parent of at most one successor,
+        so the descendants of a replayed token are exactly the sessions that
+        token could have produced — the lineage a thief would be holding.
+        Revoking that chain rather than every session the account has keeps the
+        reader's other devices signed in, which matters because a retry can
+        trigger this too.
+        """
+        now = _utc_now()
+        revoked = 0
+        seen: set[UUID] = set()
+        current: RefreshSession | None = session_record
+        while current and current.id not in seen:
+            seen.add(current.id)
+            if not current.revoked_at:
+                current.revoked_at = now
+                revoked += 1
+            next_id = current.replaced_by_session_id
+            current = self.session.get(RefreshSession, next_id) if next_id else None
+        return revoked
 
     def logout(self, *, refresh_token: str | None) -> None:
         if not refresh_token:

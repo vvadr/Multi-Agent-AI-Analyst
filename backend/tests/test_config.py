@@ -10,6 +10,7 @@ def _production_settings(**overrides) -> dict[str, object]:
     values: dict[str, object] = {
         "app_env": "production",
         "allowed_origins": "https://app.example.com",
+        "allowed_hosts": "api.example.com",
         "jwt_secret_key": "jwt-secret-that-is-longer-than-thirty-two-characters",
         "database_url": "postgresql+psycopg://user:pass@db.example.com/app",
         "gemini_api_key": "gemini-secret",
@@ -77,6 +78,11 @@ def test_production_rejects_localhost_cors() -> None:
         Settings(**_production_settings(allowed_origins="http://localhost:3000"))
 
 
+def test_production_requires_explicit_api_hosts() -> None:
+    with pytest.raises(ValidationError, match="ALLOWED_HOSTS"):
+        Settings(**_production_settings(allowed_hosts="*"))
+
+
 def test_production_requires_all_service_configuration() -> None:
     with pytest.raises(ValidationError, match="QDRANT_API_KEY"):
         Settings(**_production_settings(qdrant_api_key=None))
@@ -88,6 +94,33 @@ def test_production_runs_without_a_separate_queue() -> None:
     settings = Settings(**_production_settings(redis_url=None))
 
     assert settings.redis_url is None
+    assert settings.embedded_worker_enabled is True
+
+
+def test_configuring_redis_hands_execution_to_a_worker_service() -> None:
+    # With a queue present the API stops executing, because a separate worker
+    # is the expected topology.
+    settings = Settings(**_production_settings(redis_url="rediss://cache.example.com:6379"))
+
+    assert settings.embedded_worker_enabled is False
+
+
+def test_the_embedded_worker_can_be_forced_on_alongside_redis() -> None:
+    # A single-service deployment that happens to have Redis: durable queue,
+    # in-process execution. Without this the jobs would queue and never run.
+    settings = Settings(
+        **_production_settings(
+            redis_url="rediss://cache.example.com:6379", run_embedded_worker=True
+        )
+    )
+
+    assert settings.embedded_worker_enabled is True
+
+
+def test_the_embedded_worker_can_be_forced_off_without_redis() -> None:
+    settings = Settings(**_production_settings(redis_url=None, run_embedded_worker=False))
+
+    assert settings.embedded_worker_enabled is False
 
 
 def test_production_runs_without_any_email_provider() -> None:

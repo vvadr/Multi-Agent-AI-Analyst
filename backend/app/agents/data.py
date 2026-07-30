@@ -12,7 +12,10 @@ SqlExecutor = Callable[[str], SqlQueryResult]
 ANALYTICS_SCHEMA = """Approved source: analytics.monthly_metrics
 Columns: month (date), region (text), revenue (numeric), active_customers (integer).
 Use exactly one PostgreSQL SELECT statement over that source. Include LIMIT <= 100.
-Do not use comments, CTEs, system tables, or data-modifying statements."""
+Write the table name in full and unquoted; analytics.monthly_metrics is the only
+table you may name anywhere in the statement, including inside any subquery.
+Do not use comments, CTEs, derived tables (a subquery in FROM), quoted
+identifiers, system tables, or data-modifying statements."""
 
 
 def data_agent(

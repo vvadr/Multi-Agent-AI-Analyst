@@ -203,6 +203,31 @@ def test_the_same_credentials_work_at_the_login_endpoint(harness: Harness) -> No
     assert response.status_code == 200
 
 
+def test_login_attempts_are_limited_by_email_as_well_as_ip(
+    harness: Harness, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Changing source IP cannot turn credential stuffing into unlimited attempts."""
+    monkeypatch.setattr(harness.settings, "rate_limit_login_per_15min", 100)
+    monkeypatch.setattr(harness.settings, "rate_limit_login_per_email_15min", 1)
+    monkeypatch.setattr(harness.settings, "trust_proxy_headers", True)
+    payload = {"email": "limited@example.test", "password": PASSWORD, "display_name": "Limited"}
+    harness.client.post("/v1/auth/signup", json=payload)
+
+    first = harness.client.post(
+        "/v1/auth/login",
+        json={"email": payload["email"], "password": PASSWORD},
+        headers={"X-Forwarded-For": "198.51.100.10"},
+    )
+    second = harness.client.post(
+        "/v1/auth/login",
+        json={"email": payload["email"], "password": PASSWORD},
+        headers={"X-Forwarded-For": "203.0.113.10"},
+    )
+
+    assert first.status_code == 200
+    assert second.status_code == 429
+
+
 def test_a_duplicate_address_is_refused_with_a_usable_reason(harness: Harness) -> None:
     payload = {"email": "dup@example.test", "password": PASSWORD, "display_name": "Dup"}
     first = harness.client.post("/v1/auth/signup", json=payload)

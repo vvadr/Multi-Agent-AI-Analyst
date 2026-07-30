@@ -2,7 +2,7 @@ from collections.abc import Generator
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, func, select
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
@@ -11,6 +11,7 @@ from app.auth import dependencies as auth_dependencies
 from app.auth.service import AuthenticationError, AuthService
 from app.core.config import Settings
 from app.db.base import Base
+from app.db.models import AuditEvent, RefreshSession
 from app.db.session import get_session
 from app.main import app
 
@@ -190,5 +191,78 @@ def test_rotated_refresh_token_is_revoked(
         with pytest.raises(AuthenticationError):
             service.refresh(refresh_token=original.refresh_token)
         assert replacement.refresh_token != original.refresh_token
+    finally:
+        session.close()
+
+
+def test_replaying_a_rotated_refresh_token_revokes_its_successors(
+    auth_client: tuple[TestClient, sessionmaker[Session]], auth_settings: Settings
+) -> None:
+    """Refusing the replayed token is not enough — its successor must die too.
+
+    Whoever replays a rotated token may also hold what it was exchanged for, and
+    that successor is still valid until something revokes it.
+    """
+    _, factory = auth_client
+    bootstrap_admin(factory, auth_settings)
+    session = factory()
+    try:
+        service = AuthService(session, auth_settings)
+        stolen = service.login(
+            email="admin@example.test",
+            password="correct-horse-battery-staple",
+        )
+        second = service.refresh(refresh_token=stolen.refresh_token)
+        current = service.refresh(refresh_token=second.refresh_token)
+
+        with pytest.raises(AuthenticationError):
+            service.refresh(refresh_token=stolen.refresh_token)
+
+        # The lineage is gone, including the token the legitimate client held.
+        with pytest.raises(AuthenticationError):
+            service.refresh(refresh_token=current.refresh_token)
+        assert session.scalar(
+            select(func.count())
+            .select_from(RefreshSession)
+            .where(RefreshSession.revoked_at.is_(None))
+        ) == 0
+        assert session.scalar(
+            select(func.count())
+            .select_from(AuditEvent)
+            .where(AuditEvent.event_type == "auth.refresh_reuse_detected")
+        ) == 1
+    finally:
+        session.close()
+
+
+def test_a_refresh_token_revoked_by_logout_is_not_treated_as_a_replay(
+    auth_client: tuple[TestClient, sessionmaker[Session]], auth_settings: Settings
+) -> None:
+    """A stale cookie after signing out is ordinary, not a theft signal."""
+    _, factory = auth_client
+    bootstrap_admin(factory, auth_settings)
+    session = factory()
+    try:
+        service = AuthService(session, auth_settings)
+        first = service.login(
+            email="admin@example.test",
+            password="correct-horse-battery-staple",
+        )
+        second = service.login(
+            email="admin@example.test",
+            password="correct-horse-battery-staple",
+        )
+        service.logout(refresh_token=first.refresh_token)
+
+        with pytest.raises(AuthenticationError):
+            service.refresh(refresh_token=first.refresh_token)
+
+        # The unrelated session survives, and nothing was reported as a replay.
+        assert service.refresh(refresh_token=second.refresh_token)
+        assert session.scalar(
+            select(func.count())
+            .select_from(AuditEvent)
+            .where(AuditEvent.event_type == "auth.refresh_reuse_detected")
+        ) == 0
     finally:
         session.close()

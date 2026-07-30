@@ -26,7 +26,7 @@ from app.auth.service import (
 from app.core.config import Settings, get_settings
 from app.db.session import get_session
 from app.services.email import EmailMessage, password_reset_message
-from app.services.rate_limit import client_identifier, enforce
+from app.services.rate_limit import client_identifier, enforce, rate_limit_key
 
 logger = structlog.get_logger(__name__)
 
@@ -122,7 +122,14 @@ def signup(
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN, detail="Registration is closed"
         )
-    _limit(request, "signup", settings.rate_limit_signup_per_hour, _ONE_HOUR)
+    _limit(
+        request,
+        "signup",
+        settings.rate_limit_signup_per_hour,
+        _ONE_HOUR,
+        subject=payload.email,
+        subject_limit=settings.rate_limit_signup_per_email_per_hour,
+    )
 
     try:
         issued = AuthService(session, settings).register(
@@ -159,7 +166,14 @@ def request_password_reset(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Password reset is not available on this deployment.",
         )
-    _limit(request, "reset", settings.rate_limit_email_per_hour, _ONE_HOUR)
+    _limit(
+        request,
+        "reset",
+        settings.rate_limit_email_per_hour,
+        _ONE_HOUR,
+        subject=payload.email,
+        subject_limit=settings.rate_limit_email_per_recipient_per_hour,
+    )
     issued = AuthService(session, settings).request_password_reset(email=payload.email)
     if issued:
         email, token = issued
@@ -172,7 +186,14 @@ def confirm_password_reset(
     payload: PasswordResetRequest, request: Request, session: DbSession
 ) -> AcceptedResponse:
     settings = get_settings()
-    _limit(request, "reset-confirm", settings.rate_limit_email_per_hour, _ONE_HOUR)
+    _limit(
+        request,
+        "reset-confirm",
+        settings.rate_limit_email_per_hour,
+        _ONE_HOUR,
+        subject=payload.token,
+        subject_limit=settings.rate_limit_email_per_recipient_per_hour,
+    )
     try:
         AuthService(session, settings).reset_password(
             token=payload.token, password=payload.password
@@ -193,7 +214,14 @@ def login(
     session: DbSession,
 ) -> TokenResponse:
     settings = get_settings()
-    _limit(request, "login", settings.rate_limit_login_per_15min, _FIFTEEN_MINUTES)
+    _limit(
+        request,
+        "login",
+        settings.rate_limit_login_per_15min,
+        _FIFTEEN_MINUTES,
+        subject=payload.email,
+        subject_limit=settings.rate_limit_login_per_email_15min,
+    )
     try:
         issued = AuthService(session, settings).login(
             email=payload.email,
@@ -208,27 +236,34 @@ def login(
 
 @router.post("/refresh", response_model=TokenResponse)
 def refresh(
+    request: Request,
     response: Response,
     session: DbSession,
     refresh_token: Annotated[str | None, Cookie(alias=REFRESH_COOKIE_NAME)] = None,
 ) -> TokenResponse:
+    settings = get_settings()
+    _require_same_origin_for_cookie_auth(request, settings)
+    _limit(request, "refresh", settings.rate_limit_refresh_per_15min, _FIFTEEN_MINUTES)
     try:
-        issued = AuthService(session, get_settings()).refresh(refresh_token=refresh_token or "")
+        issued = AuthService(session, settings).refresh(refresh_token=refresh_token or "")
     except AuthenticationError as exc:
-        _clear_refresh_cookie(response, get_settings())
+        _clear_refresh_cookie(response, settings)
         raise _invalid_refresh() from exc
-    _set_refresh_cookie(response, issued.refresh_token, get_settings())
+    _set_refresh_cookie(response, issued.refresh_token, settings)
     return _token_response(issued)
 
 
 @router.post("/logout", status_code=status.HTTP_204_NO_CONTENT)
 def logout(
+    request: Request,
     response: Response,
     session: DbSession,
     refresh_token: Annotated[str | None, Cookie(alias=REFRESH_COOKIE_NAME)] = None,
 ) -> None:
-    AuthService(session, get_settings()).logout(refresh_token=refresh_token)
-    _clear_refresh_cookie(response, get_settings())
+    settings = get_settings()
+    _require_same_origin_for_cookie_auth(request, settings)
+    AuthService(session, settings).logout(refresh_token=refresh_token)
+    _clear_refresh_cookie(response, settings)
 
 
 @router.post("/invites", response_model=InviteResponse, status_code=status.HTTP_201_CREATED)
@@ -237,8 +272,17 @@ def create_invite(
     principal: Annotated[Principal, Depends(require_organization_admin)],
     session: DbSession,
 ) -> InviteResponse:
+    settings = get_settings()
+    enforce(
+        get_rate_limiter(),
+        settings=settings,
+        key=rate_limit_key("invite", "organization", str(principal.organization_id)),
+        limit=settings.rate_limit_invites_per_hour,
+        window_seconds=_ONE_HOUR,
+        unavailable="reject",
+    )
     try:
-        created = AuthService(session, get_settings()).create_invite(
+        created = AuthService(session, settings).create_invite(
             principal=principal,
             email=payload.email,
             role=payload.role,
@@ -264,9 +308,17 @@ def accept_invite(
 ) -> UserResponse:
     # An invite token is a bearer credential; guessing it must be as expensive
     # as guessing a password.
-    _limit(request, "invite-accept", get_settings().rate_limit_email_per_hour, _ONE_HOUR)
+    settings = get_settings()
+    _limit(
+        request,
+        "invite-accept",
+        settings.rate_limit_email_per_hour,
+        _ONE_HOUR,
+        subject=payload.token,
+        subject_limit=settings.rate_limit_email_per_recipient_per_hour,
+    )
     try:
-        principal = AuthService(session, get_settings()).accept_invite(
+        principal = AuthService(session, settings).accept_invite(
             token=payload.token,
             password=payload.password,
             display_name=payload.display_name,
@@ -284,14 +336,55 @@ def me(principal: Annotated[Principal, Depends(get_current_principal)]) -> UserR
     return _user_response(principal)
 
 
-def _limit(request: Request, bucket: str, limit: int, window_seconds: int) -> None:
+def _limit(
+    request: Request,
+    bucket: str,
+    limit: int,
+    window_seconds: int,
+    *,
+    subject: str | None = None,
+    subject_limit: int | None = None,
+) -> None:
+    settings = get_settings()
+    limiter = get_rate_limiter()
     enforce(
-        get_rate_limiter(),
-        settings=get_settings(),
-        key=f"{bucket}:{client_identifier(request)}",
+        limiter,
+        settings=settings,
+        key=rate_limit_key(
+            bucket,
+            "ip",
+            client_identifier(request, trust_forwarded_headers=settings.trust_proxy_headers),
+        ),
         limit=limit,
         window_seconds=window_seconds,
     )
+    if subject:
+        enforce(
+            limiter,
+            settings=settings,
+            key=rate_limit_key(bucket, "subject", subject),
+            limit=subject_limit or limit,
+            window_seconds=window_seconds,
+        )
+
+
+def _require_same_origin_for_cookie_auth(request: Request, settings: Settings) -> None:
+    """Reject cross-site form posts that would otherwise send a SameSite=None cookie.
+
+    The frontend and API are intentionally different origins, so the refresh
+    cookie must use SameSite=None. Browser POSTs include Origin; requiring an
+    origin from the configured frontend blocks a third-party site from rotating
+    a reader's cookie or logging them out. Non-production keeps this relaxed so
+    the local API and its test client remain convenient to use.
+    """
+    if settings.app_env != "production":
+        return
+    origin = request.headers.get("origin")
+    if origin not in settings.cors_origins:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="This request must come from the configured application origin.",
+        )
 
 
 def _deliver(message: EmailMessage) -> None:
