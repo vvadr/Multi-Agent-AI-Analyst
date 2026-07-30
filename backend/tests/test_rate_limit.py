@@ -12,6 +12,7 @@ from app.services.rate_limit import (
     build_rate_limiter,
     client_identifier,
     enforce,
+    rate_limit_key,
 )
 from tests.test_queue import FakeRedis
 
@@ -127,13 +128,37 @@ def test_enforce_is_inert_when_limiting_is_switched_off() -> None:
         enforce(limiter, settings=settings, key="k", limit=1, window_seconds=60)
 
 
+def test_expensive_work_is_refused_when_its_distributed_limiter_is_unavailable() -> None:
+    class BrokenRedis(FakeRedis):
+        def pipeline(self):
+            raise ConnectionError("redis is unreachable")
+
+    with pytest.raises(HTTPException) as caught:
+        enforce(
+            _redis_limiter(BrokenRedis()),
+            settings=Settings(app_env="test"),
+            key="k",
+            limit=1,
+            window_seconds=60,
+            unavailable="reject",
+        )
+
+    assert caught.value.status_code == 503
+
+
 # ------------------------------------------------------------ identifier
 
 
-def test_the_forwarded_client_address_is_preferred() -> None:
+def test_a_forwarded_address_is_ignored_until_a_proxy_is_explicitly_trusted() -> None:
     request = _request({"X-Forwarded-For": "203.0.113.7, 70.41.3.18"})
 
-    assert client_identifier(request) == "203.0.113.7"
+    assert client_identifier(request) == "10.0.0.1"
+
+
+def test_the_forwarded_client_address_is_used_when_the_proxy_is_trusted() -> None:
+    request = _request({"X-Forwarded-For": "203.0.113.7, 70.41.3.18"})
+
+    assert client_identifier(request, trust_forwarded_headers=True) == "203.0.113.7"
 
 
 def test_the_socket_address_is_used_without_a_forwarding_header() -> None:
@@ -141,7 +166,17 @@ def test_the_socket_address_is_used_without_a_forwarding_header() -> None:
 
 
 def test_an_empty_forwarding_header_falls_back_to_the_socket() -> None:
-    assert client_identifier(_request({"X-Forwarded-For": ""})) == "10.0.0.1"
+    assert (
+        client_identifier(_request({"X-Forwarded-For": ""}), trust_forwarded_headers=True)
+        == "10.0.0.1"
+    )
+
+
+def test_rate_limit_keys_do_not_embed_the_limited_subject() -> None:
+    key = rate_limit_key("login", "email", "reader@example.test")
+
+    assert "reader@example.test" not in key
+    assert key.startswith("login:email:")
 
 
 # --------------------------------------------------------------- factory

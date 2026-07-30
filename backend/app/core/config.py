@@ -67,6 +67,14 @@ class Settings(BaseSettings):
     api_v1_prefix: str = "/v1"
     log_level: str = "INFO"
     allowed_origins: str = "http://localhost:3000"
+    # Hosts the API will answer for.  This rejects Host-header attacks before
+    # route handling and must name the public API domain in production.
+    allowed_hosts: str = "localhost,127.0.0.1,testserver"
+    # Enable only when every request reaches the app through a proxy that
+    # overwrites X-Forwarded-For (as Render does for its public service URL).
+    # Trusting that header on a directly reachable app would let a caller pick
+    # a fresh rate-limit identity on every request.
+    trust_proxy_headers: bool = False
 
     jwt_secret_key: SecretStr | None = None
     jwt_algorithm: str = "HS256"
@@ -183,8 +191,13 @@ class Settings(BaseSettings):
 
     rate_limit_enabled: bool = True
     rate_limit_login_per_15min: int = Field(default=10, ge=1)
+    rate_limit_login_per_email_15min: int = Field(default=5, ge=1)
     rate_limit_signup_per_hour: int = Field(default=5, ge=1)
+    rate_limit_signup_per_email_per_hour: int = Field(default=3, ge=1)
     rate_limit_email_per_hour: int = Field(default=5, ge=1)
+    rate_limit_email_per_recipient_per_hour: int = Field(default=3, ge=1)
+    rate_limit_refresh_per_15min: int = Field(default=30, ge=1)
+    rate_limit_invites_per_hour: int = Field(default=30, ge=1)
     rate_limit_runs_per_hour: int = Field(default=60, ge=1)
     rate_limit_uploads_per_hour: int = Field(default=30, ge=1)
     daily_run_quota_per_organization: int = Field(default=200, ge=1)
@@ -192,6 +205,10 @@ class Settings(BaseSettings):
     @property
     def cors_origins(self) -> list[str]:
         return [origin.strip() for origin in self.allowed_origins.split(",") if origin.strip()]
+
+    @property
+    def trusted_hosts(self) -> list[str]:
+        return [host.strip() for host in self.allowed_hosts.split(",") if host.strip()]
 
     @property
     def use_model_gateway(self) -> bool:
@@ -284,6 +301,19 @@ class Settings(BaseSettings):
         if unsafe_origins:
             raise ValueError(
                 "production ALLOWED_ORIGINS must not contain localhost or placeholders"
+            )
+
+        if not self.trusted_hosts:
+            raise ValueError("production ALLOWED_HOSTS must contain the API hostname")
+        unsafe_hosts = [
+            host
+            for host in self.trusted_hosts
+            if host == "*" or "://" in host or "localhost" in host or "your-api" in host
+        ]
+        if unsafe_hosts:
+            raise ValueError(
+                "production ALLOWED_HOSTS must contain explicit API hostnames, "
+                "not wildcards or placeholders"
             )
 
         if self.object_storage_region == "auto":

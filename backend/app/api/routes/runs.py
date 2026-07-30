@@ -30,7 +30,7 @@ from app.db.models import RUN_TERMINAL_STATUSES
 from app.db.session import create_session, get_session
 from app.services import run_store
 from app.services.queue import JOB_EXECUTE_RUN
-from app.services.rate_limit import enforce
+from app.services.rate_limit import enforce, rate_limit_key
 from app.services.run_store import QuotaExceededError
 
 router = APIRouter()
@@ -84,9 +84,10 @@ def create_run(
     enforce(
         get_rate_limiter(),
         settings=settings,
-        key=f"runs:{principal.organization_id}",
+        key=rate_limit_key("runs", "organization", str(principal.organization_id)),
         limit=settings.rate_limit_runs_per_hour,
         window_seconds=_ONE_HOUR,
+        unavailable="reject",
     )
     try:
         run_store.consume_daily_quota(

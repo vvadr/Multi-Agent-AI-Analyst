@@ -10,6 +10,7 @@ def _production_settings(**overrides) -> dict[str, object]:
     values: dict[str, object] = {
         "app_env": "production",
         "allowed_origins": "https://app.example.com",
+        "allowed_hosts": "api.example.com",
         "jwt_secret_key": "jwt-secret-that-is-longer-than-thirty-two-characters",
         "database_url": "postgresql+psycopg://user:pass@db.example.com/app",
         "gemini_api_key": "gemini-secret",
@@ -75,6 +76,11 @@ def test_development_rejects_remote_data_services() -> None:
 def test_production_rejects_localhost_cors() -> None:
     with pytest.raises(ValidationError, match="ALLOWED_ORIGINS"):
         Settings(**_production_settings(allowed_origins="http://localhost:3000"))
+
+
+def test_production_requires_explicit_api_hosts() -> None:
+    with pytest.raises(ValidationError, match="ALLOWED_HOSTS"):
+        Settings(**_production_settings(allowed_hosts="*"))
 
 
 def test_production_requires_all_service_configuration() -> None:

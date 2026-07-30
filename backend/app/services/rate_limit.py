@@ -15,6 +15,8 @@ from __future__ import annotations
 import threading
 import time
 from dataclasses import dataclass
+from hashlib import sha256
+from typing import Literal
 
 import structlog
 from fastapi import HTTPException, Request, status
@@ -30,6 +32,7 @@ _KEY_PREFIX = "analyst:rate"
 class RateLimitResult:
     allowed: bool
     retry_after_seconds: int
+    backend_available: bool = True
 
 
 class InMemoryRateLimiter:
@@ -84,7 +87,7 @@ class RedisRateLimiter:
             # Failing open is the deliberate choice: a Redis outage must not
             # take sign-in down. The tradeoff is logged so it is visible.
             logger.warning("rate_limit_backend_unavailable", key=key)
-            return RateLimitResult(True, 0)
+            return RateLimitResult(True, 0, backend_available=False)
         if count > limit:
             return RateLimitResult(False, max(1, int(ttl)))
         return RateLimitResult(True, 0)
@@ -96,20 +99,27 @@ def build_rate_limiter(settings: Settings) -> RedisRateLimiter | InMemoryRateLim
     return InMemoryRateLimiter()
 
 
-def client_identifier(request: Request) -> str:
+def client_identifier(request: Request, *, trust_forwarded_headers: bool = False) -> str:
     """Best available caller identity for limiting.
 
-    Render terminates TLS and sets `X-Forwarded-For`, so its first entry is the
-    real client. It is spoofable by anything that can reach the app directly,
-    which is why limits that protect an account (rather than the edge) are keyed
-    on the account instead.
+    A managed proxy terminates TLS and supplies `X-Forwarded-For`, but that
+    value is caller-controlled when an app is directly reachable. It is used
+    only after production has explicitly opted into trusting its proxy.
     """
-    forwarded = request.headers.get("x-forwarded-for")
-    if forwarded:
-        first = forwarded.split(",")[0].strip()
-        if first:
-            return first
+    if trust_forwarded_headers:
+        forwarded = request.headers.get("x-forwarded-for")
+        if forwarded:
+            first = forwarded.split(",")[0].strip()
+            if first:
+                return first
     return request.client.host if request.client else "unknown"
+
+
+def rate_limit_key(bucket: str, subject_kind: str, subject: str) -> str:
+    """Build a stable limiter key without storing IPs, emails, or tokens in Redis."""
+    normalized = subject.strip().casefold()
+    digest = sha256(normalized.encode("utf-8")).hexdigest()
+    return f"{bucket}:{subject_kind}:{digest}"
 
 
 def enforce(
@@ -119,11 +129,17 @@ def enforce(
     key: str,
     limit: int,
     window_seconds: int,
+    unavailable: Literal["allow", "reject"] = "allow",
 ) -> None:
     """Raise 429 with `Retry-After` when the caller is over its allowance."""
     if not settings.rate_limit_enabled:
         return
     result = limiter.check(key, limit=limit, window_seconds=window_seconds)
+    if not result.backend_available and unavailable == "reject":
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Request protection is temporarily unavailable. Try again shortly.",
+        )
     if result.allowed:
         return
     raise HTTPException(

@@ -27,7 +27,7 @@ from app.ingestion.extraction import is_supported_document
 from app.services import document_store
 from app.services.object_storage import ObjectStorage, object_key
 from app.services.queue import JOB_INGEST_DOCUMENT
-from app.services.rate_limit import enforce
+from app.services.rate_limit import enforce, rate_limit_key
 
 router = APIRouter()
 UPLOAD_FILE = File(...)
@@ -67,9 +67,10 @@ async def upload_document(
     enforce(
         get_rate_limiter(),
         settings=settings,
-        key=f"upload:{principal.organization_id}",
+        key=rate_limit_key("upload", "organization", str(principal.organization_id)),
         limit=settings.rate_limit_uploads_per_hour,
         window_seconds=_ONE_HOUR,
+        unavailable="reject",
     )
 
     filename = file.filename or ""

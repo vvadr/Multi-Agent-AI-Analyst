@@ -5,12 +5,14 @@ from contextlib import asynccontextmanager
 import structlog
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from app.api.deps import get_job_queue
 from app.api.router import api_router, versioned_api_router
 from app.core.config import Settings, get_settings
 from app.core.logging import configure_logging
 from app.middleware.request_id import RequestIdMiddleware
+from app.middleware.security_headers import SecurityHeadersMiddleware
 
 logger = structlog.get_logger(__name__)
 
@@ -81,6 +83,8 @@ def create_app() -> FastAPI:
         allow_methods=["*"],
         allow_headers=["*"],
     )
+    app.add_middleware(TrustedHostMiddleware, allowed_hosts=settings.trusted_hosts)
+    app.add_middleware(SecurityHeadersMiddleware, production=settings.app_env == "production")
     app.add_middleware(RequestIdMiddleware)
     app.include_router(api_router)
     app.include_router(versioned_api_router, prefix=settings.api_v1_prefix)
