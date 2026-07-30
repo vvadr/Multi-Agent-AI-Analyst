@@ -97,7 +97,7 @@ describe("sign-in screen", () => {
   });
 
   it("hides password reset when the backend cannot deliver a link", async () => {
-    // `NEXT_PUBLIC_ENABLE_PASSWORD_RESET` is unset in tests, matching a
+    // `NEXT_PUBLIC_ENABLE_ACCOUNT_RECOVERY` is unset in tests, matching a
     // deployment with no email provider. Offering the link would send the
     // reader to an endpoint that answers 503.
     routeLogin(() => tokenResponse());
