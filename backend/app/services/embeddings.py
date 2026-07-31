@@ -3,6 +3,7 @@
 import httpx
 
 from app.core.config import Settings
+from app.services import model_provider
 
 
 class GeminiEmbeddingProvider:
@@ -17,14 +18,21 @@ class GeminiEmbeddingProvider:
 
     def embed(self, texts: list[str]) -> list[list[float]]:
         from google import genai
-        from google.genai import types
+        from google.genai import errors, types
 
         client = genai.Client(api_key=self.api_key)
-        response = client.models.embed_content(
-            model=self.model,
-            contents=texts,
-            config=types.EmbedContentConfig(output_dimensionality=self.dimensions),
-        )
+        try:
+            response = client.models.embed_content(
+                model=self.model,
+                contents=texts,
+                config=types.EmbedContentConfig(output_dimensionality=self.dimensions),
+            )
+        except errors.APIError as error:
+            # Indexing hits the same account as generation, so an exhausted or
+            # misconfigured provider must not cost every upload three attempts.
+            raise model_provider.from_provider_exception(
+                error, context="gemini embedding"
+            ) from error
         return [list(embedding.values) for embedding in response.embeddings]
 
 
@@ -37,6 +45,7 @@ class GatewayEmbeddingProvider:
         self.url = f"{settings.litellm_base_url.rstrip('/')}/v1/embeddings"
         self.api_key = settings.litellm_master_key.get_secret_value()
         self.model = settings.litellm_embedding_model
+        self.dimensions = settings.embedding_dimensions
         # Embedding a document is an agent operation, not a quick readiness
         # probe. It shares the bounded run timeout rather than the short probe
         # timeout so an otherwise healthy provider is not rejected prematurely.
@@ -46,10 +55,20 @@ class GatewayEmbeddingProvider:
         response = httpx.post(
             self.url,
             headers={"Authorization": f"Bearer {self.api_key}"},
-            json={"model": self.model, "input": texts},
+            # `dimensions` is what keeps the provider's vector and the Qdrant
+            # collection the same width. Omitting it against a model whose
+            # native size differs from EMBEDDING_DIMENSIONS gets every upsert
+            # rejected at write time, long after the misconfiguration.
+            # OpenAI honours it; LiteLLM drops it for models that cannot.
+            json={"model": self.model, "input": texts, "dimensions": self.dimensions},
             timeout=self.timeout,
         )
-        response.raise_for_status()
+        try:
+            response.raise_for_status()
+        except httpx.HTTPStatusError as error:
+            raise model_provider.from_http_status(
+                error, context="gateway embedding"
+            ) from error
         body = response.json()
         data = body.get("data") if isinstance(body, dict) else None
         if not isinstance(data, list):

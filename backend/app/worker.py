@@ -29,6 +29,7 @@ from app.ingestion.factory import build_document_ingestion_service
 from app.services import document_store, run_store
 from app.services.generation import build_text_generator
 from app.services.memory import ConversationMemory
+from app.services.model_provider import ModelProviderError
 from app.services.object_storage import ObjectStorage
 from app.services.observability import build_observability
 from app.services.queue import (
@@ -82,11 +83,24 @@ class Worker:
             else:
                 logger.warning("job_type_unknown", job_type=job.type)
             self.queue.ack(job)
-        except Exception:
+        except Exception as error:
             session.rollback()
-            logger.exception("job_failed", job_type=job.type, attempts=job.attempts)
-            will_retry = self.queue.retry(job)
-            if not will_retry:
+            refused = isinstance(error, ModelProviderError) and error.permanent
+            logger.exception(
+                "job_failed",
+                job_type=job.type,
+                attempts=job.attempts,
+                provider_refused=refused,
+                provider_status=getattr(error, "status_code", None),
+            )
+            if refused:
+                # Every remaining attempt would be refused the same way, so the
+                # reader gets a terminal answer now rather than after the queue
+                # has spent its budget discovering that.
+                self.queue.ack(job)
+                self._mark_permanently_failed(session, job, provider_refused=True)
+                return
+            if not self.queue.retry(job):
                 self._mark_permanently_failed(session, job)
         finally:
             session.close()
@@ -199,13 +213,23 @@ class Worker:
 
     # ------------------------------------------------------------ recovery
 
-    def _mark_permanently_failed(self, session: Session, job: Job) -> None:
+    def _mark_permanently_failed(
+        self, session: Session, job: Job, *, provider_refused: bool = False
+    ) -> None:
         """Give the reader a terminal answer once retries are exhausted."""
         try:
             if job.type == JOB_EXECUTE_RUN:
                 run = session.get(Run, _job_uuid(job, "run_id"))
                 if run and run.status not in {"completed", "failed", "cancelled"}:
-                    run_store.mark_failed(session, run=run)
+                    run_store.mark_failed(
+                        session,
+                        run=run,
+                        message=(
+                            run_store.RUN_PROVIDER_FAILURE_MESSAGE
+                            if provider_refused
+                            else run_store.RUN_FAILURE_MESSAGE
+                        ),
+                    )
             elif job.type == JOB_INGEST_DOCUMENT:
                 document = session.get(Document, _job_uuid(job, "document_id"))
                 if document and document.status not in {"ready", "deleted"}:

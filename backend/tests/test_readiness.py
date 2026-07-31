@@ -1,9 +1,18 @@
 from unittest.mock import MagicMock
 
 import boto3
+import pytest
 
 from app.core.config import Settings
 from app.services import readiness
+
+
+@pytest.fixture(autouse=True)
+def _clear_model_probe_cache():
+    """The probe cache is process-wide; a leaked verdict would hide a regression."""
+    readiness._model_probe_cache.clear()
+    yield
+    readiness._model_probe_cache.clear()
 
 
 def _configured_settings() -> Settings:
@@ -97,26 +106,84 @@ def test_object_storage_probe_heads_private_bucket(monkeypatch) -> None:
     client.head_bucket.assert_called_once_with(Bucket="analyst-documents")
 
 
-def test_model_probe_uses_gemini_metadata_endpoint(monkeypatch) -> None:
+def test_model_probe_generates_rather_than_reading_metadata(monkeypatch) -> None:
+    # Metadata endpoints answer 200 for an account that cannot generate a
+    # single token, so readiness has to spend one to mean anything.
     response = MagicMock()
-    monkeypatch.setattr(readiness.httpx, "get", lambda *args, **kwargs: response)
+    post = MagicMock(return_value=response)
+    monkeypatch.setattr(readiness.httpx, "post", post)
 
-    readiness._probe_model(_configured_settings())
+    readiness._call_model(_configured_settings())
 
+    assert post.call_args.args[0].endswith(":generateContent")
+    assert post.call_args.kwargs["json"]["generationConfig"]["maxOutputTokens"] == 1
     response.raise_for_status.assert_called_once()
 
 
-def test_model_probe_uses_gateway_when_configured(monkeypatch) -> None:
+def test_model_probe_exercises_the_gateway_upstream_not_its_liveness(monkeypatch) -> None:
     response = MagicMock()
-    get = MagicMock(return_value=response)
-    monkeypatch.setattr(readiness.httpx, "get", get)
+    post = MagicMock(return_value=response)
+    monkeypatch.setattr(readiness.httpx, "post", post)
     settings = Settings(
         app_env="test",
         litellm_base_url="http://litellm:4000",
         litellm_master_key="gateway-secret",
     )
 
+    readiness._call_model(settings)
+
+    # /health/liveliness proves the proxy is up, not that its Google key works.
+    assert post.call_args.args[0] == "http://litellm:4000/v1/chat/completions"
+    assert post.call_args.kwargs["json"]["max_tokens"] == 1
+    response.raise_for_status.assert_called_once()
+
+
+def test_model_probe_allows_more_time_than_a_socket_check(monkeypatch) -> None:
+    post = MagicMock(return_value=MagicMock())
+    monkeypatch.setattr(readiness.httpx, "post", post)
+
+    readiness._call_model(_configured_settings())
+
+    assert post.call_args.kwargs["timeout"].connect >= 10.0
+
+
+def test_a_refused_model_is_not_ready(monkeypatch) -> None:
+    def refuse(_settings: Settings) -> None:
+        raise RuntimeError("429 RESOURCE_EXHAUSTED: prepayment credits are depleted")
+
+    monkeypatch.setattr(readiness, "_call_model", refuse)
+
+    result = readiness.check_readiness(_configured_settings())
+
+    assert result["model"] == {"configured": True, "reachable": False}
+
+
+def test_repeated_readiness_checks_do_not_bill_per_request(monkeypatch) -> None:
+    # `/readyz` needs no credentials, so an uncached probe would let anyone
+    # spend the account's tokens by holding down refresh.
+    calls = []
+    monkeypatch.setattr(readiness, "_call_model", lambda _settings: calls.append(1))
+    settings = _configured_settings()
+
+    readiness._probe_model(settings)
+    readiness._probe_model(settings)
     readiness._probe_model(settings)
 
-    assert get.call_args.args[0] == "http://litellm:4000/health/liveliness"
-    response.raise_for_status.assert_called_once()
+    assert len(calls) == 1
+
+
+def test_a_cached_failure_is_replayed_rather_than_forgotten(monkeypatch) -> None:
+    calls = []
+
+    def refuse(_settings: Settings) -> None:
+        calls.append(1)
+        raise RuntimeError("provider refused")
+
+    monkeypatch.setattr(readiness, "_call_model", refuse)
+    settings = _configured_settings()
+
+    for _ in range(3):
+        with pytest.raises(RuntimeError):
+            readiness._probe_model(settings)
+
+    assert len(calls) == 1
