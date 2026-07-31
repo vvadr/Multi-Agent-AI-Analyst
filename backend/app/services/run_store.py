@@ -22,6 +22,14 @@ from app.db.models import DailyUsage, Feedback, Run, RunCitation, RunEvent
 # every internal cause: a provider outage and a malformed graph response must
 # be indistinguishable to a reader.
 RUN_FAILURE_MESSAGE = "The analyst run could not complete. Please try again."
+# Kept distinct from the message above because the advice in it would be wrong:
+# the model provider refused the request outright, and the next attempt is
+# refused identically until someone fixes the key, the model name, or the
+# account. Still fixed copy — no provider text reaches a reader through this.
+RUN_PROVIDER_FAILURE_MESSAGE = (
+    "The analyst service could not reach its model provider. This needs an "
+    "administrator — retrying will not help."
+)
 
 
 class QuotaExceededError(Exception):

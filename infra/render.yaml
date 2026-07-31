@@ -32,7 +32,7 @@ services:
         value: https://multi-agent-ai-analyst-psi.vercel.app
       # API hostname only; add any custom API domain if one is configured.
       - key: ALLOWED_HOSTS
-        value: multi-agent-ai-analyst-api.onrender.com
+        value: multi-agent-ai-analyst-or03.onrender.com
       # Render's public proxy replaces the forwarding header before the app
       # sees it, so rate limiting can use the real caller IP safely.
       - key: TRUST_PROXY_HEADERS

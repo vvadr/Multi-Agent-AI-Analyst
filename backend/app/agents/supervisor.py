@@ -6,6 +6,7 @@ from collections.abc import Callable
 from typing import Literal
 
 from app.agents.state import AgentState
+from app.services.model_provider import ModelProviderError
 
 RouteName = Literal["retriever", "web", "data", "finish"]
 TextGenerator = Callable[[str], str]
@@ -39,6 +40,13 @@ def choose_route(
         route = parsed.get("next") if isinstance(parsed, dict) else None
         if route in allowed_names:
             return route
+    except ModelProviderError as error:
+        # A rejected key, an unknown model, or an exhausted account is not a
+        # router hiccup. Falling back would send the graph on to specialists
+        # that call the same provider, spending the run's budget to fail the
+        # same way, so this one goes to the worker as a terminal failure.
+        if error.permanent:
+            raise
     except (TypeError, ValueError, RuntimeError):
         pass
     return _fallback_route(state, allowed)

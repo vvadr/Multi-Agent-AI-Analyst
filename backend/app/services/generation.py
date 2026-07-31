@@ -6,6 +6,7 @@ from typing import Protocol
 import httpx
 
 from app.core.config import Settings
+from app.services import model_provider
 from app.services.observability import WorkflowObservability
 
 
@@ -35,14 +36,19 @@ class GeminiTextGenerator:
 
     def generate_with_usage(self, prompt: str) -> GeneratedText:
         from google import genai
-        from google.genai import types
+        from google.genai import errors, types
 
         client = genai.Client(api_key=self.api_key)
-        response = client.models.generate_content(
-            model=self.model,
-            contents=prompt,
-            config=types.GenerateContentConfig(temperature=0),
-        )
+        try:
+            response = client.models.generate_content(
+                model=self.model,
+                contents=prompt,
+                config=types.GenerateContentConfig(temperature=0),
+            )
+        except errors.APIError as error:
+            raise model_provider.from_provider_exception(
+                error, context="gemini generation"
+            ) from error
         if not response.text:
             raise RuntimeError("model returned an empty response")
         usage = getattr(response, "usage_metadata", None)
@@ -79,6 +85,11 @@ class GatewayTextGenerator:
             response.raise_for_status()
             body = response.json()
             content = body["choices"][0]["message"]["content"]
+        except httpx.HTTPStatusError as exc:
+            # The gateway forwards the upstream status, so a depleted Google
+            # account still arrives here as a 429 and stays distinguishable
+            # from the proxy simply being down.
+            raise model_provider.from_http_status(exc, context="gateway generation") from exc
         except (httpx.HTTPError, KeyError, IndexError, TypeError, ValueError) as exc:
             raise RuntimeError("model generation request failed") from exc
         if not isinstance(content, str) or not content.strip():

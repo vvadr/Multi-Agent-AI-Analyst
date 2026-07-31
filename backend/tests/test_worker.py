@@ -24,6 +24,7 @@ from app.db.base import Base
 from app.db.models import Document, Organization, Run
 from app.ingestion.extraction import DocumentExtractionError
 from app.services import document_store, run_store
+from app.services.model_provider import ModelProviderError
 from app.services.queue import JOB_EXECUTE_RUN, JOB_INGEST_DOCUMENT, InMemoryJobQueue, Job
 from app.worker import Worker
 
@@ -233,6 +234,52 @@ def test_a_run_is_marked_failed_once_retries_are_exhausted(
     assert stored.error == run_store.RUN_FAILURE_MESSAGE
     # The message is fixed copy, never the provider's text.
     assert "provider unavailable" not in (stored.error or "")
+
+
+def test_a_refused_provider_fails_the_run_without_spending_retries(
+    fixture: Fixture, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    run = _make_run(fixture)
+
+    def refuse(*args: Any, **kwargs: Any) -> None:
+        raise ModelProviderError(
+            "gemini generation failed: prepayment credits are depleted",
+            permanent=True,
+            status_code=429,
+        )
+
+    monkeypatch.setattr(worker_module, "run_workflow", refuse)
+
+    # attempts=0 means retries remain; a permanent refusal must not use them.
+    fixture.worker.handle(Job(id="j1", type=JOB_EXECUTE_RUN, payload={"run_id": str(run.id)}))
+
+    stored = _reload(fixture, Run, run.id)
+    assert stored.status == "failed"
+    assert stored.error == run_store.RUN_PROVIDER_FAILURE_MESSAGE
+    # Nothing was requeued, so the reader waits once rather than three times.
+    assert fixture.queue.claim(timeout_seconds=0) is None
+    # And the provider's own words never reach the row a reader can see.
+    assert "credits" not in (stored.error or "")
+
+
+def test_a_transient_provider_error_is_still_retried(
+    fixture: Fixture, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    run = _make_run(fixture)
+
+    def overloaded(*args: Any, **kwargs: Any) -> None:
+        raise ModelProviderError(
+            "gemini generation failed: the model is overloaded",
+            permanent=False,
+            status_code=503,
+        )
+
+    monkeypatch.setattr(worker_module, "run_workflow", overloaded)
+
+    fixture.worker.handle(Job(id="j1", type=JOB_EXECUTE_RUN, payload={"run_id": str(run.id)}))
+
+    assert _reload(fixture, Run, run.id).status == "running"
+    assert fixture.queue.claim(timeout_seconds=0) is not None
 
 
 def test_an_already_finished_run_is_not_executed_again(fixture: Fixture) -> None:
