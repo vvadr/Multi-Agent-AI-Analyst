@@ -21,6 +21,7 @@ class ConversationMemory:
             raise ValueError("Qdrant is not configured")
         self.collection = f"{settings.qdrant_collection}_memory"
         self.dimensions = settings.embedding_dimensions
+        self._prepared = False
         self.embeddings = build_embedding_provider(settings)
         self.client = QdrantClient(
             url=settings.qdrant_url,
@@ -71,6 +72,15 @@ class ConversationMemory:
         ]
 
     def _ensure_collection(self) -> None:
+        """Create the collection and the `tenant_id` index `recall` filters on.
+
+        Without the index Qdrant answers the recall filter with a 400. Recall
+        failures are swallowed by the caller so a lost follow-up hint never
+        fails an otherwise good answer — which means a missing index disables
+        memory permanently and silently, with nothing surfacing to say so.
+        """
+        if self._prepared:
+            return
         if not self.client.collection_exists(self.collection):
             self.client.create_collection(
                 collection_name=self.collection,
@@ -79,3 +89,10 @@ class ConversationMemory:
                     distance=models.Distance.COSINE,
                 ),
             )
+        self.client.create_payload_index(
+            collection_name=self.collection,
+            field_name="tenant_id",
+            field_schema=models.PayloadSchemaType.KEYWORD,
+            wait=True,
+        )
+        self._prepared = True

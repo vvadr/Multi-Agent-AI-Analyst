@@ -5,6 +5,13 @@ from qdrant_client import QdrantClient, models
 from app.core.config import Settings
 from app.ingestion.service import SearchResult, VectorPoint
 
+# Payload fields the queries below filter on. Qdrant rejects a filter on an
+# unindexed field with a 400 rather than falling back to a scan, so these
+# indexes are what make search and delete work at all, not a tuning knob.
+# `tenant_id` carries the isolation guarantee and `document_id` narrows a
+# delete, and both are exact-match strings, hence the keyword schema.
+_FILTERED_PAYLOAD_FIELDS = ("tenant_id", "document_id")
+
 
 class QdrantVectorStore:
     """Manage one fixed-dimension collection and filter every search by tenant."""
@@ -14,6 +21,7 @@ class QdrantVectorStore:
             raise ValueError("QDRANT_URL and QDRANT_API_KEY are required for document ingestion")
         self.collection = settings.qdrant_collection
         self.dimensions = settings.embedding_dimensions
+        self._prepared = False
         self.client = QdrantClient(
             url=settings.qdrant_url,
             api_key=settings.qdrant_api_key.get_secret_value(),
@@ -106,6 +114,14 @@ class QdrantVectorStore:
         self.client.close()
 
     def _ensure_collection(self) -> None:
+        """Create the collection and the payload indexes its filters require.
+
+        Cached per instance: every read and write calls this, and a collection
+        outlives the process, so re-checking on each operation spends a round
+        trip to learn what the first one already established.
+        """
+        if self._prepared:
+            return
         if not self.client.collection_exists(self.collection):
             self.client.create_collection(
                 collection_name=self.collection,
@@ -114,3 +130,15 @@ class QdrantVectorStore:
                     distance=models.Distance.COSINE,
                 ),
             )
+        # Deliberately outside the branch above. Creating an index that already
+        # exists is a no-op, so this also repairs a collection created before
+        # these indexes were declared, rather than leaving every search against
+        # it failing on a 400 that reads like a client bug.
+        for field in _FILTERED_PAYLOAD_FIELDS:
+            self.client.create_payload_index(
+                collection_name=self.collection,
+                field_name=field,
+                field_schema=models.PayloadSchemaType.KEYWORD,
+                wait=True,
+            )
+        self._prepared = True
