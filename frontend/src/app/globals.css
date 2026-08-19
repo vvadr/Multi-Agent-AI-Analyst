@@ -1,38 +1,440 @@
 @import "tailwindcss";
 
+/**
+ * Design system: "Instrument".
+ *
+ * The product's distinguishing promise is that it shows its work — the run
+ * trace names every stage and deliberately refuses to render model, router, or
+ * backend text. So the visual language is an instrument rather than a chat
+ * app: a dark console, monospaced data, and a colour spectrum that *encodes*
+ * the pipeline instead of decorating it.
+ *
+ * Colour is functional here. Each of the four workflow stages owns one hue,
+ * and that hue is the same wherever the stage appears — the signal pipeline,
+ * the trace cards, the citation kinds. A reader learns the mapping once.
+ *
+ * Fonts are self-hosted through `@fontsource-variable` (imported in
+ * `layout.tsx`). No third-party font origin is requested, which keeps the
+ * `font-src 'self'` directive in `security-headers.ts` intact.
+ */
+
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  color-scheme: light;
+
+  /* --- Surfaces: a cool lab-paper white, not pure #fff --- */
+  --surface-void: #f2f4f9;
+  --surface-panel: #ffffff;
+  --surface-raised: #f7f9fd;
+  --surface-sunken: #e8ecf5;
 
   /*
-   * Self-contained typography: system faces only, so the production build needs
-   * no access to Google Fonts and the browser makes no third-party font
-   * request. See the note in `layout.tsx`.
+   * Input ground, kept separate from `--surface-sunken`.
+   * On a light card, a recessed grey field reads as *disabled* rather than as
+   * editable, so light mode gives inputs the brightest surface it has and lets
+   * the border do the work of defining them. Dark mode has the opposite
+   * problem and genuinely wants the recess.
    */
-  --font-system-sans:
-    ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue",
-    Arial, "Noto Sans", sans-serif, "Apple Color Emoji", "Segoe UI Emoji";
-  --font-system-mono:
-    ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono",
-    "Courier New", monospace;
+  --field: #ffffff;
+
+  /* --- Lines --- */
+  --line: rgb(16 22 45 / 0.1);
+  --line-strong: rgb(16 22 45 / 0.18);
+
+  /* --- Ink --- */
+  --ink: #10162d;
+  --ink-dim: #545c78;
+  --ink-faint: #7b839c;
+
+  /*
+   * --- The stage spectrum ---
+   * Supervisor decides, an agent gathers, review scrutinises, the answer
+   * resolves. The progression cool → warm → resolved is the run's story.
+   */
+  --stage-supervisor: #6344e8;
+  --stage-agent: #0891b2;
+  --stage-review: #c2740a;
+  --stage-answer: #0d9464;
+
+  /* --- Status. Never the only signal; text always says it too. --- */
+  --ok: #0d9464;
+  --warn: #c2740a;
+  --bad: #d33a3a;
+
+  --accent: var(--stage-supervisor);
+  --accent-contrast: #ffffff;
+
+  /* Ambient field strength — dialled right down in light mode, where a glow
+     on white reads as a smudge rather than as emitted light. */
+  --ambient-opacity: 0.26;
+  --glass-blur: 16px;
+  --glass-tint: rgb(255 255 255 / 0.80);
+
+  /* Legacy aliases: existing components and tests reference these. */
+  --background: var(--surface-void);
+  --foreground: var(--ink);
+
+  --font-display: "Bricolage Grotesque Variable", "Inter Variable", ui-sans-serif,
+    system-ui, sans-serif;
+  --font-body: "Inter Variable", ui-sans-serif, system-ui, -apple-system,
+    "Segoe UI", Roboto, "Helvetica Neue", Arial, "Noto Sans", sans-serif,
+    "Apple Color Emoji", "Segoe UI Emoji";
+  --font-data: "JetBrains Mono Variable", ui-monospace, SFMono-Regular, "SF Mono",
+    Menlo, Consolas, "Liberation Mono", "Courier New", monospace;
+
+  /* Retained: `globals.css` previously exported these names. */
+  --font-system-sans: var(--font-body);
+  --font-system-mono: var(--font-data);
+
+  --ease-out-expo: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
 }
 
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-system-sans);
-  --font-mono: var(--font-system-mono);
-}
-
+/**
+ * Dark is the instrument's native state — you do not build an oscilloscope on
+ * white. Defined twice so the system default and the explicit toggle both win:
+ * once under the media query (guarded so an explicit `light` choice survives),
+ * once under the attribute.
+ */
 @media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+
+    --surface-void: #05070f;
+    --surface-panel: #0b0f1d;
+    --surface-raised: #121728;
+    --surface-sunken: #03040a;
+    --field: #0a0e1a;
+
+    --line: rgb(255 255 255 / 0.09);
+    --line-strong: rgb(255 255 255 / 0.17);
+
+    --ink: #e9ecf7;
+    --ink-dim: #8c94b0;
+    --ink-faint: #5f6780;
+
+    --stage-supervisor: #8b6bff;
+    --stage-agent: #22d3ee;
+    --stage-review: #ffb74d;
+    --stage-answer: #34e5a0;
+
+    --ok: #34e5a0;
+    --warn: #ffb74d;
+    --bad: #ff6b6b;
+
+    --accent-contrast: #05070f;
+    --ambient-opacity: 1;
+    --glass-tint: rgb(14 19 36 / 0.78);
   }
 }
 
+:root[data-theme="dark"] {
+  color-scheme: dark;
+
+  --surface-void: #05070f;
+  --surface-panel: #0b0f1d;
+  --surface-raised: #121728;
+  --surface-sunken: #03040a;
+  --field: #0a0e1a;
+
+  --line: rgb(255 255 255 / 0.09);
+  --line-strong: rgb(255 255 255 / 0.17);
+
+  --ink: #e9ecf7;
+  --ink-dim: #8c94b0;
+  --ink-faint: #5f6780;
+
+  --stage-supervisor: #8b6bff;
+  --stage-agent: #22d3ee;
+  --stage-review: #ffb74d;
+  --stage-answer: #34e5a0;
+
+  --ok: #34e5a0;
+  --warn: #ffb74d;
+  --bad: #ff6b6b;
+
+  --accent-contrast: #05070f;
+  --ambient-opacity: 1;
+  --glass-tint: rgb(14 19 36 / 0.78);
+}
+
+@theme inline {
+  --color-background: var(--surface-void);
+  --color-foreground: var(--ink);
+
+  --color-void: var(--surface-void);
+  --color-panel: var(--surface-panel);
+  --color-raised: var(--surface-raised);
+  --color-sunken: var(--surface-sunken);
+  --color-field: var(--field);
+
+  --color-line: var(--line);
+  --color-line-strong: var(--line-strong);
+
+  --color-ink: var(--ink);
+  --color-ink-dim: var(--ink-dim);
+  --color-ink-faint: var(--ink-faint);
+
+  --color-supervisor: var(--stage-supervisor);
+  --color-agent: var(--stage-agent);
+  --color-review: var(--stage-review);
+  --color-answer: var(--stage-answer);
+
+  --color-ok: var(--ok);
+  --color-warn: var(--warn);
+  --color-bad: var(--bad);
+  --color-accent: var(--accent);
+
+  --font-display: var(--font-display);
+  --font-sans: var(--font-body);
+  --font-mono: var(--font-data);
+}
+
+/* ------------------------------------------------------------------ */
+/* Base                                                                */
+/* ------------------------------------------------------------------ */
+
+* {
+  border-color: var(--line);
+}
+
+html {
+  /* Lenis drives scrolling; the native smooth behaviour would fight it. */
+  scroll-behavior: auto;
+  -webkit-tap-highlight-color: transparent;
+}
+
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: var(--font-system-sans);
+  background: var(--surface-void);
+  color: var(--ink);
+  font-family: var(--font-body);
+  font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+  overflow-x: hidden;
+}
+
+/* Data is always monospaced. In an instrument, numbers line up. */
+.font-data,
+code,
+kbd,
+samp {
+  font-family: var(--font-data);
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "zero" 1;
+}
+
+.font-display {
+  font-family: var(--font-display);
+  letter-spacing: -0.03em;
+}
+
+::selection {
+  background: color-mix(in oklab, var(--accent) 28%, transparent);
+  color: var(--ink);
+}
+
+/* One focus treatment for the whole app, keyboard-only. */
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--line-strong);
+  border-radius: 99px;
+  border: 3px solid transparent;
+  background-clip: content-box;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--ink-faint);
+  background-clip: content-box;
+}
+
+/* ------------------------------------------------------------------ */
+/* Utilities                                                           */
+/* ------------------------------------------------------------------ */
+
+/** A panel that reads as glass sitting above the ambient field. */
+.glass {
+  background: var(--glass-tint);
+  backdrop-filter: blur(var(--glass-blur)) saturate(1.4);
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(1.4);
+  border: 1px solid var(--line);
+}
+
+/**
+ * The hairline highlight along a panel's top edge.
+ *
+ * This is what sells "lit from above" and therefore depth. Light mode has no
+ * emitted light to catch, so it is dark-only.
+ */
+:root[data-theme="dark"] .lit-edge::before,
+.lit-edge::before {
+  content: "";
+  position: absolute;
+  inset-inline: 0;
+  top: 0;
+  height: 1px;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    color-mix(in oklab, var(--ink) 22%, transparent),
+    transparent
+  );
+  pointer-events: none;
+}
+
+:root:not([data-theme="dark"]) .lit-edge::before {
+  opacity: 0;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .lit-edge::before {
+    opacity: 1;
+  }
+}
+
+/** Film grain. Kills the flatness of large dark fields without adding an asset. */
+.grain::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  opacity: 0.028;
+  mix-blend-mode: overlay;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='3'/%3E%3C/filter%3E%3Crect width='140' height='140' filter='url(%23n)'/%3E%3C/svg%3E");
+}
+
+/**
+ * Text that carries the stage spectrum as a gradient. Display sizes only.
+ *
+ * The review stage's amber is deliberately left out of this ramp. It is the
+ * one hue in the set that has no legible form on a light ground — every mix
+ * between it and its neighbours lands in olive — and a headline has to be
+ * readable before it is thematic. The full four-hue spectrum still appears
+ * wherever it is doing its actual job of identifying a stage.
+ */
+.spectrum-text {
+  background: linear-gradient(
+    100deg,
+    var(--stage-supervisor),
+    var(--stage-agent) 55%,
+    var(--stage-answer)
+  );
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+/* ------------------------------------------------------------------ */
+/* Keyframes                                                           */
+/* ------------------------------------------------------------------ */
+
+@keyframes breathe {
+  0%,
+  100% {
+    opacity: 0.5;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1.06);
+  }
+}
+
+@keyframes drift {
+  0% {
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+  33% {
+    transform: translate3d(3%, -4%, 0) scale(1.08);
+  }
+  66% {
+    transform: translate3d(-3%, 3%, 0) scale(0.96);
+  }
+  100% {
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+}
+
+@keyframes sweep {
+  from {
+    transform: translateX(-120%);
+  }
+  to {
+    transform: translateX(220%);
+  }
+}
+
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(14px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.animate-breathe {
+  animation: breathe 3.6s ease-in-out infinite;
+}
+.animate-drift {
+  animation: drift 26s ease-in-out infinite;
+}
+.animate-rise {
+  animation: rise 0.55s var(--ease-out-expo) both;
+}
+
+/**
+ * The indeterminate progress sheen, used while a run is in flight.
+ * Kept as CSS so it costs no JavaScript on a surface that is already busy.
+ */
+.sheen {
+  position: relative;
+  overflow: hidden;
+}
+.sheen::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  width: 45%;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    color-mix(in oklab, var(--accent) 26%, transparent),
+    transparent
+  );
+  animation: sweep 1.6s var(--ease-out-expo) infinite;
+}
+
+/* ------------------------------------------------------------------ */
+/* Reduced motion                                                      */
+/* ------------------------------------------------------------------ */
+
+/**
+ * A reader who asks for less motion gets none of the ambient kind. State
+ * changes still need to be perceivable, so transitions collapse to a duration
+ * short enough to read as instant rather than being removed outright.
+ */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
+
+  .grain::after,
+  .sheen::after {
+    display: none;
+  }
 }

@@ -1,5 +1,7 @@
 "use client";
 
+import { AnimatePresence, motion, useReducedMotion } from "motion/react";
+import { Check, Copy, Sparkles } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import {
@@ -9,6 +11,7 @@ import {
   listRuns,
   streamRunEvents,
 } from "@/lib/api";
+import { cn } from "@/lib/cn";
 import { clearDraft, readDraft, saveDraft } from "@/lib/drafts";
 import {
   MAX_QUESTION_LENGTH,
@@ -20,6 +23,10 @@ import {
 
 import { CitationList } from "./citation-list";
 import { RunFeedback } from "./run-feedback";
+import { Button } from "./ui/button";
+import { Panel, PanelHeader } from "./ui/panel";
+import { SignalPipeline } from "./ui/signal-pipeline";
+import { useToast } from "./ui/toast";
 import { WorkflowTrace, type WorkflowTracePhase } from "./workflow-trace";
 
 type RunState =
@@ -52,6 +59,9 @@ const RUN_FAILED_MESSAGE =
 const CANCELLED_MESSAGE =
   "Stopped following this run. It may still be finishing on the server.";
 
+/** How often the elapsed readout ticks while a run is in flight. */
+const ELAPSED_TICK_MS = 100;
+
 /**
  * Ask a question, follow the run over SSE, and render the grounded answer.
  *
@@ -73,6 +83,8 @@ export function AnalystWorkspace() {
   // survives the trip through the login screen.
   const [question, setQuestion] = useState(() => readDraft("question"));
   const [state, setState] = useState<RunState>({ kind: "idle" });
+  const [elapsed, setElapsed] = useState(0);
+  const [copied, setCopied] = useState(false);
 
   const stopRef = useRef<(() => void) | null>(null);
   const mountedRef = useRef(true);
@@ -80,6 +92,8 @@ export function AnalystWorkspace() {
   const settledRef = useRef(false);
   const askedRef = useRef("");
   const retryRef = useRef<HTMLButtonElement | null>(null);
+  const reduceMotion = useReducedMotion();
+  const toast = useToast();
 
   const stopStream = useCallback(() => {
     stopRef.current?.();
@@ -185,6 +199,7 @@ export function AnalystWorkspace() {
       stopStream();
       settledRef.current = false;
       askedRef.current = trimmed;
+      setCopied(false);
       setState({ kind: "starting" });
 
       let runId: string;
@@ -259,6 +274,24 @@ export function AnalystWorkspace() {
     state.kind === "running" ||
     state.kind === "resolving";
 
+  /**
+   * The elapsed readout.
+   *
+   * An instrument that shows stages but not how long they are taking leaves the
+   * reader unable to tell "thinking" from "stuck". It ticks only while a run is
+   * in flight, and the final duration stays on screen once one settles.
+   */
+  useEffect(() => {
+    if (!busy) return;
+    const startedAt = performance.now();
+    setElapsed(0);
+    const timer = setInterval(
+      () => setElapsed(performance.now() - startedAt),
+      ELAPSED_TICK_MS,
+    );
+    return () => clearInterval(timer);
+  }, [busy]);
+
   /** The stage trail, kept on screen once the run settles. */
   const steps = "steps" in state ? (state.steps ?? []) : [];
   const phase = tracePhase(state);
@@ -281,60 +314,109 @@ export function AnalystWorkspace() {
     void ask(question);
   };
 
+  const copyAnswer = async (answer: string) => {
+    try {
+      await navigator.clipboard.writeText(answer);
+      setCopied(true);
+      toast("success", "Answer copied.");
+      window.setTimeout(() => setCopied(false), 2000);
+    } catch {
+      // Clipboard access is refused in some contexts. Saying so beats a
+      // button that silently does nothing.
+      toast("error", "The answer could not be copied.");
+    }
+  };
+
+  const remaining = MAX_QUESTION_LENGTH - question.length;
+
   return (
-    <section
-      aria-labelledby="analyst-heading"
-      className="w-full rounded-xl border border-black/[.08] p-5 text-left dark:border-white/[.145]"
-    >
-      <h2 id="analyst-heading" className="text-sm font-semibold">
-        2 · Ask a question
-      </h2>
+    <Panel aria-labelledby="analyst-heading" delay={0.1}>
+      <PanelHeader
+        id="analyst-heading"
+        step="02"
+        title="Ask a question"
+        action={
+          busy || elapsed > 0 ? (
+            <span className="font-data text-ink-dim text-xs tabular-nums">
+              {(elapsed / 1000).toFixed(1)}s
+            </span>
+          ) : undefined
+        }
+      />
+
+      {/* The instrument readout. Decorative — the trace below carries the
+          semantics — so it is hidden from assistive technology. */}
+      <div className="mt-4 mb-1">
+        <SignalPipeline steps={steps} phase={phase} />
+      </div>
 
       <form onSubmit={handleSubmit} className="mt-4">
-        <label htmlFor="question" className="block text-sm font-medium">
+        <label htmlFor="question" className="text-ink block text-sm font-medium">
           Your question
         </label>
-        <textarea
-          id="question"
-          name="question"
-          rows={3}
-          value={question}
-          onChange={(event) => {
-            setQuestion(event.target.value);
-            saveDraft("question", event.target.value);
-          }}
-          maxLength={MAX_QUESTION_LENGTH}
-          disabled={busy}
-          aria-describedby="question-hint"
-          className="mt-2 w-full rounded-lg border border-black/[.08] bg-transparent p-3 text-sm disabled:opacity-50 dark:border-white/[.145]"
-        />
-        <p
-          id="question-hint"
-          className="mt-1 text-xs text-black/60 dark:text-white/60"
-        >
+        <div className="relative mt-2">
+          <textarea
+            id="question"
+            name="question"
+            rows={3}
+            value={question}
+            onChange={(event) => {
+              setQuestion(event.target.value);
+              saveDraft("question", event.target.value);
+            }}
+            onKeyDown={(event) => {
+              // ⌘/Ctrl + Enter submits, the convention for a multi-line field
+              // whose Enter key has to stay a newline.
+              if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
+                event.preventDefault();
+                void ask(question);
+              }
+            }}
+            maxLength={MAX_QUESTION_LENGTH}
+            disabled={busy}
+            aria-describedby="question-hint"
+            placeholder="What were the main risks flagged in this report?"
+            className={cn(
+              "border-line bg-[var(--field)] text-ink placeholder:text-ink-faint",
+              "w-full resize-y rounded-xl border p-3.5 text-sm leading-relaxed transition-colors",
+              "focus:border-[color-mix(in_oklab,var(--accent)_55%,transparent)] focus:outline-none",
+              "disabled:opacity-50",
+            )}
+          />
+          {/* Only appears as the limit gets close; a counter on an empty field
+              is noise about a constraint nobody is near. */}
+          {remaining < 120 && (
+            <span className="font-data text-ink-faint absolute right-3 bottom-3 text-[10px] tabular-nums">
+              {remaining}
+            </span>
+          )}
+        </div>
+
+        <p id="question-hint" className="text-ink-faint mt-2 text-xs leading-relaxed">
           Answers are grounded in your indexed documents and, when the backend
           enables it, web research. Follow-up questions can build on earlier
           questions and answers in your workspace, so you can ask one without
           repeating the context.
         </p>
 
-        <div className="mt-3 flex flex-wrap gap-2">
-          <button
+        <div className="mt-4 flex flex-wrap items-center gap-2">
+          <Button
             type="submit"
+            variant="primary"
             disabled={busy || !question.trim()}
-            className="rounded-full border border-black/[.08] px-4 py-1.5 text-sm transition-colors hover:bg-black/[.04] disabled:opacity-50 dark:border-white/[.145] dark:hover:bg-white/[.06]"
+            className={cn(busy && "sheen")}
           >
+            <Sparkles aria-hidden className="h-3.5 w-3.5" />
             {busy ? "Working…" : "Ask"}
-          </button>
+          </Button>
           {busy && (
-            <button
-              type="button"
-              onClick={cancel}
-              className="rounded-full border border-black/[.08] px-4 py-1.5 text-sm transition-colors hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-white/[.06]"
-            >
+            <Button type="button" variant="ghost" onClick={cancel}>
               Cancel
-            </button>
+            </Button>
           )}
+          <kbd className="font-data border-line text-ink-faint ml-auto hidden rounded border px-1.5 py-0.5 text-[10px] sm:inline">
+            ⌘ ↵
+          </kbd>
         </div>
       </form>
 
@@ -347,7 +429,7 @@ export function AnalystWorkspace() {
         role="status"
         aria-live="polite"
         aria-busy={busy}
-        className="mt-4 text-sm font-medium"
+        className="text-ink mt-5 text-sm font-medium"
       >
         {announcementFor(state)}
       </p>
@@ -355,47 +437,97 @@ export function AnalystWorkspace() {
       {steps.length > 0 && (
         <ol
           aria-label="Progress updates"
-          className="mt-2 space-y-1 text-sm text-black/70 dark:text-white/70"
+          className="border-line mt-2 space-y-1.5 border-l pl-3.5 text-sm"
         >
-          {steps.map((step, index) => (
-            <li
-              key={`${step}-${index}`}
-              aria-current={
-                state.kind === "running" && index === steps.length - 1
-                  ? "step"
-                  : undefined
-              }
-            >
-              {RUN_PROGRESS_LABELS[step]}
-            </li>
-          ))}
+          {steps.map((step, index) => {
+            const current = state.kind === "running" && index === steps.length - 1;
+            return (
+              <motion.li
+                key={`${step}-${index}`}
+                initial={reduceMotion ? false : { opacity: 0, x: -6 }}
+                animate={{ opacity: 1, x: 0 }}
+                transition={{ duration: 0.35, ease: [0.16, 1, 0.3, 1] }}
+                aria-current={current ? "step" : undefined}
+                className={cn(
+                  "relative",
+                  current ? "text-ink" : "text-ink-dim",
+                )}
+              >
+                <span
+                  aria-hidden
+                  className={cn(
+                    "bg-[var(--surface-void)] border-line absolute top-1.5 -left-[18px] h-1.5 w-1.5 rounded-full border",
+                    current && "animate-breathe border-transparent bg-[var(--accent)]",
+                  )}
+                />
+                {RUN_PROGRESS_LABELS[step]}
+              </motion.li>
+            );
+          })}
         </ol>
       )}
 
       {phase && <WorkflowTrace steps={steps} phase={phase} />}
 
-      {state.kind === "complete" && (
-        <div className="mt-4">
-          <h3 className="text-sm font-semibold">Answer</h3>
-          {state.detail.answer ? (
-            <p className="mt-2 text-sm whitespace-pre-wrap">
-              {state.detail.answer}
-            </p>
-          ) : (
-            <p className="mt-2 text-sm text-black/60 dark:text-white/60">
-              The run completed without an answer.
-            </p>
-          )}
-          <CitationList citations={state.detail.citations} />
-          <RunFeedback runId={state.runId} />
-        </div>
-      )}
+      <AnimatePresence>
+        {state.kind === "complete" && (
+          <motion.div
+            key="answer"
+            initial={reduceMotion ? false : { opacity: 0, y: 14 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.55, ease: [0.16, 1, 0.3, 1] }}
+            className="mt-5"
+          >
+            <div className="flex items-center justify-between gap-3">
+              <h3 className="font-display text-ink text-sm font-semibold">Answer</h3>
+              {state.detail.answer && (
+                <Button
+                  type="button"
+                  variant="quiet"
+                  size="sm"
+                  onClick={() => void copyAnswer(state.detail.answer as string)}
+                >
+                  {copied ? (
+                    <Check aria-hidden className="h-3.5 w-3.5" />
+                  ) : (
+                    <Copy aria-hidden className="h-3.5 w-3.5" />
+                  )}
+                  {copied ? "Copied" : "Copy"}
+                </Button>
+              )}
+            </div>
+
+            {state.detail.answer ? (
+              <div
+                className="mt-2 rounded-xl border p-4"
+                style={{
+                  borderColor: "color-mix(in oklab, var(--stage-answer) 28%, transparent)",
+                  background: "color-mix(in oklab, var(--stage-answer) 6%, transparent)",
+                }}
+              >
+                <p className="text-ink text-sm leading-relaxed whitespace-pre-wrap">
+                  {state.detail.answer}
+                </p>
+              </div>
+            ) : (
+              <p className="text-ink-dim mt-2 text-sm">
+                The run completed without an answer.
+              </p>
+            )}
+            <CitationList citations={state.detail.citations} />
+            <RunFeedback runId={state.runId} />
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {state.kind === "failed" && (
-        <div role="alert" className="mt-4 text-sm text-red-700 dark:text-red-400">
+        <div
+          role="alert"
+          className="border-[color-mix(in_oklab,var(--bad)_35%,transparent)] bg-[color-mix(in_oklab,var(--bad)_8%,transparent)] text-bad mt-4 rounded-xl border p-3 text-sm"
+        >
           <p>{state.message}</p>
           {state.requestId && (
-            <p className="mt-1 break-all font-mono text-xs text-black/60 dark:text-white/60">
+            <p className="font-data text-ink-faint mt-1.5 text-xs break-all">
               Request ID: {state.requestId}
             </p>
           )}
@@ -403,16 +535,18 @@ export function AnalystWorkspace() {
       )}
 
       {stopped && askedRef.current && (
-        <button
+        <Button
           ref={retryRef}
           type="button"
+          variant="ghost"
+          size="sm"
+          className="mt-3"
           onClick={() => void ask(askedRef.current)}
-          className="mt-3 rounded-full border border-black/[.08] px-4 py-1.5 text-sm transition-colors hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-white/[.06]"
         >
           Try again
-        </button>
+        </Button>
       )}
-    </section>
+    </Panel>
   );
 }
 

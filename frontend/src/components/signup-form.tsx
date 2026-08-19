@@ -83,7 +83,7 @@ export function SignupForm() {
     >
       <form onSubmit={handleSubmit} noValidate className="mt-5 space-y-4">
         <div>
-          <label htmlFor={nameId} className="block text-sm font-medium">
+          <label htmlFor={nameId} className="text-ink block text-sm font-medium">
             Your name
           </label>
           <input
@@ -102,7 +102,7 @@ export function SignupForm() {
         </div>
 
         <div>
-          <label htmlFor={emailId} className="block text-sm font-medium">
+          <label htmlFor={emailId} className="text-ink block text-sm font-medium">
             Email
           </label>
           <input
@@ -121,7 +121,7 @@ export function SignupForm() {
         </div>
 
         <div>
-          <label htmlFor={passwordId} className="block text-sm font-medium">
+          <label htmlFor={passwordId} className="text-ink block text-sm font-medium">
             Password
           </label>
           <input
@@ -137,15 +137,15 @@ export function SignupForm() {
             aria-describedby={error ? errorId : undefined}
             className={FIELD_CLASS}
           />
-          <p className={`mt-2 text-xs text-black/50 dark:text-white/50`}>
+          <p className="text-ink-faint mt-2 text-xs">
             At least 12 characters.
           </p>
         </div>
 
         <div>
-          <label htmlFor={organizationId} className="block text-sm font-medium">
+          <label htmlFor={organizationId} className="text-ink block text-sm font-medium">
             Workspace name{" "}
-            <span className="font-normal text-black/50 dark:text-white/50">
+            <span className="text-ink-faint font-normal">
               (optional)
             </span>
           </label>
@@ -166,7 +166,7 @@ export function SignupForm() {
         <button type="submit" disabled={submitting} className={BUTTON_CLASS}>
           {submitting ? "Creating account…" : "Create account"}
         </button>
-        <p className="text-xs text-black/50 dark:text-white/50">
+        <p className="text-ink-faint text-xs">
           No confirmation email — you go straight to your workspace.
         </p>
       </form>

@@ -1,4 +1,6 @@
+import { cn } from "@/lib/cn";
 import type { RunEventType } from "@/lib/runs";
+import { STAGE_TONES } from "@/lib/stages";
 
 /**
  * The reader-facing view of the workflow: supervisor → selected agent →
@@ -64,14 +66,20 @@ const STATUS_COPY: Record<TraceStageStatus, string> = {
   unreached: "Not reached",
 };
 
-/** Status text carries the meaning; colour is a redundant second signal. */
+/**
+ * Status text carries the meaning; colour is a redundant second signal.
+ *
+ * The active stage is set in plain ink rather than a colour of its own — the
+ * card it sits in already carries that stage's hue on its border and dot, and
+ * tinting the word as well would leave the row with no stable reading weight.
+ */
 const STATUS_CLASSES: Record<TraceStageStatus, string> = {
-  waiting: "text-black/50 dark:text-white/50",
-  active: "text-blue-700 dark:text-blue-300",
-  done: "text-green-700 dark:text-green-400",
-  skipped: "text-black/50 dark:text-white/50",
-  stopped: "text-red-700 dark:text-red-400",
-  unreached: "text-black/50 dark:text-white/50",
+  waiting: "text-ink-faint",
+  active: "text-ink",
+  done: "text-ok",
+  skipped: "text-ink-faint",
+  stopped: "text-bad",
+  unreached: "text-ink-faint",
 };
 
 /** Statuses a stage can hold while the run is still progressing normally. */
@@ -140,13 +148,13 @@ export function WorkflowTrace({
   return (
     <section
       aria-labelledby="workflow-trace-heading"
-      className="mt-4 rounded-lg border border-black/[.08] p-3 dark:border-white/[.145]"
+      className="border-line bg-[var(--surface-raised)] mt-5 rounded-xl border p-3.5"
     >
       <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
-        <h3 id="workflow-trace-heading" className="text-sm font-semibold">
+        <h3 id="workflow-trace-heading" className="font-display text-ink text-sm font-semibold">
           Live workflow
         </h3>
-        <p className="text-xs text-black/60 dark:text-white/60">
+        <p className="text-ink-faint text-xs">
           Stage names only — no model, router, or backend text
         </p>
       </div>
@@ -155,24 +163,59 @@ export function WorkflowTrace({
         aria-label="Live workflow trace"
         className="mt-3 grid gap-2 sm:grid-cols-4"
       >
-        {stages.map((stage, index) => (
-          <li
-            key={stage.id}
-            aria-current={stage.status === "active" ? "step" : undefined}
-            className="rounded-md border border-black/[.08] p-2 aria-[current=step]:border-blue-600/40 dark:border-white/[.145] dark:aria-[current=step]:border-blue-300/40"
-          >
-            <p className="text-[11px] uppercase tracking-wide text-black/50 dark:text-white/50">
-              Step {index + 1}
-            </p>
-            <h4 className="mt-0.5 text-sm font-medium">{stage.label}</h4>
-            <p className={`mt-1 text-sm font-medium ${STATUS_CLASSES[stage.status]}`}>
-              {STATUS_COPY[stage.status]}
-            </p>
-            <p className="mt-1 text-xs text-black/60 dark:text-white/60">
-              {stage.detail}
-            </p>
-          </li>
-        ))}
+        {stages.map((stage, index) => {
+          const tone = STAGE_TONES[stage.id].color;
+          const lit = stage.status === "active" || stage.status === "done";
+          return (
+            <li
+              key={stage.id}
+              aria-current={stage.status === "active" ? "step" : undefined}
+              /* The active stage is raised out of the row: a tinted ground, its
+                 own hue on the border, and a glow. Status text still carries the
+                 meaning — colour is the second signal, never the only one. */
+              className={cn(
+                "border-line relative overflow-hidden rounded-lg border p-2.5 transition-all duration-500",
+                stage.status === "active" && "bg-[color-mix(in_oklab,var(--surface-panel)_70%,transparent)]",
+                stage.status === "stopped" && "border-[color-mix(in_oklab,var(--bad)_40%,transparent)]",
+              )}
+              style={
+                stage.status === "active"
+                  ? {
+                      borderColor: `color-mix(in oklab, ${tone} 50%, transparent)`,
+                      boxShadow: `0 0 26px -8px ${tone}`,
+                    }
+                  : undefined
+              }
+            >
+              <div className="flex items-center gap-1.5">
+                <span
+                  aria-hidden
+                  className={cn(
+                    "h-1.5 w-1.5 shrink-0 rounded-full transition-colors duration-500",
+                    stage.status === "active" && "animate-breathe",
+                  )}
+                  style={{
+                    background:
+                      stage.status === "stopped"
+                        ? "var(--bad)"
+                        : lit
+                          ? tone
+                          : "var(--ink-faint)",
+                    boxShadow: lit ? `0 0 8px ${tone}` : undefined,
+                  }}
+                />
+                <p className="font-data text-ink-faint text-[10px] tracking-[0.14em] uppercase">
+                  Step {index + 1}
+                </p>
+              </div>
+              <h4 className="text-ink mt-1 text-sm font-medium">{stage.label}</h4>
+              <p className={`mt-0.5 text-sm font-medium ${STATUS_CLASSES[stage.status]}`}>
+                {STATUS_COPY[stage.status]}
+              </p>
+              <p className="text-ink-dim mt-1 text-xs leading-snug">{stage.detail}</p>
+            </li>
+          );
+        })}
       </ol>
     </section>
   );

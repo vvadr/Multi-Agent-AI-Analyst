@@ -3,6 +3,8 @@
 import { useRouter } from "next/navigation";
 import { useEffect } from "react";
 
+import { SPECTRUM } from "@/lib/stages";
+
 import { useAuth } from "./auth-provider";
 
 /**
@@ -27,13 +29,32 @@ export function RequireAuth({ children }: { children: React.ReactNode }) {
   if (status === "authenticated") return <>{children}</>;
 
   return (
-    <p
-      role="status"
-      aria-live="polite"
-      aria-busy={status === "loading"}
-      className="p-8 text-sm text-black/60 dark:text-white/60"
-    >
-      {status === "loading" ? "Checking your session…" : "Taking you to sign in…"}
-    </p>
+    <div className="flex min-h-screen flex-col items-center justify-center gap-5 p-8">
+      {/* The four stage colours, cycling. The wait is short, so this reads as
+          the instrument warming up rather than as a spinner. */}
+      <span aria-hidden className="flex items-end gap-1.5">
+        {SPECTRUM.map((color, index) => (
+          <span
+            key={color}
+            className="animate-breathe w-1 rounded-full"
+            style={{
+              background: color,
+              height: `${12 + index * 4}px`,
+              boxShadow: `0 0 10px ${color}`,
+              animationDelay: `${index * 0.14}s`,
+            }}
+          />
+        ))}
+      </span>
+
+      <p
+        role="status"
+        aria-live="polite"
+        aria-busy={status === "loading"}
+        className="text-ink-dim text-sm"
+      >
+        {status === "loading" ? "Checking your session…" : "Taking you to sign in…"}
+      </p>
+    </div>
   );
 }

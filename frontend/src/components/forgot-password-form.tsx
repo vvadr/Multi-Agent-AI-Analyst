@@ -97,7 +97,7 @@ export function ForgotPasswordForm() {
     >
       <form onSubmit={handleSubmit} noValidate className="mt-5 space-y-4">
         <div>
-          <label htmlFor={emailId} className="block text-sm font-medium">
+          <label htmlFor={emailId} className="text-ink block text-sm font-medium">
             Email
           </label>
           <input

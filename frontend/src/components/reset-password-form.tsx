@@ -110,7 +110,7 @@ export function ResetPasswordForm() {
     <AuthCard headingId="reset-heading" title="Choose a new password">
       <form onSubmit={handleSubmit} noValidate className="mt-5 space-y-4">
         <div>
-          <label htmlFor={passwordId} className="block text-sm font-medium">
+          <label htmlFor={passwordId} className="text-ink block text-sm font-medium">
             New password
           </label>
           <input
@@ -126,7 +126,7 @@ export function ResetPasswordForm() {
             aria-describedby={error ? errorId : undefined}
             className={FIELD_CLASS}
           />
-          <p className="mt-2 text-xs text-black/50 dark:text-white/50">
+          <p className="text-ink-faint mt-2 text-xs">
             At least 12 characters.
           </p>
         </div>

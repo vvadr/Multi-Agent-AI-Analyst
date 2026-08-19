@@ -8,6 +8,15 @@ import { ApiError } from "@/lib/api";
 import { MIN_PASSWORD_LENGTH, validateInviteInput, type AuthUser } from "@/lib/auth";
 import { acceptInvite } from "@/lib/auth-api";
 
+import {
+  AuthCard,
+  BUTTON_CLASS,
+  FIELD_CLASS,
+  FormError,
+  LINK_CLASS,
+  MUTED_CLASS,
+} from "./auth-shell";
+
 const GENERIC_FAILURE = "The invitation could not be accepted. Try again.";
 
 /**
@@ -84,43 +93,27 @@ export function InviteAcceptForm() {
 
   if (accepted) {
     return (
-      <section
-        aria-labelledby="invite-accepted-heading"
-        className="w-full max-w-sm rounded-xl border border-black/[.08] p-6 text-left dark:border-white/[.145]"
-      >
-        <h1 id="invite-accepted-heading" className="text-lg font-semibold">
-          Invitation accepted
-        </h1>
-        <p role="status" className="mt-2 text-sm">
+      <AuthCard headingId="invite-accepted-heading" title="Invitation accepted">
+        <p role="status" className="text-ink-dim mt-2 text-sm">
           Your account for {accepted.email} is ready. Sign in with the password
           you just chose.
         </p>
-        <Link
-          href="/login"
-          className="mt-5 inline-block rounded-full border border-black/[.08] px-4 py-2 text-sm transition-colors hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-white/[.06]"
-        >
+        <Link href="/login" className={`mt-6 inline-block text-center ${BUTTON_CLASS}`}>
           Go to sign in
         </Link>
-      </section>
+      </AuthCard>
     );
   }
 
   return (
-    <section
-      aria-labelledby="invite-heading"
-      className="w-full max-w-sm rounded-xl border border-black/[.08] p-6 text-left dark:border-white/[.145]"
+    <AuthCard
+      headingId="invite-heading"
+      title="Accept your invitation"
+      subtitle="Set a password to finish setting up the account your administrator invited."
     >
-      <h1 id="invite-heading" className="text-lg font-semibold">
-        Accept your invitation
-      </h1>
-      <p className="mt-1 text-sm text-black/60 dark:text-white/60">
-        Set a password to finish setting up the account your administrator
-        invited.
-      </p>
-
-      <form onSubmit={handleSubmit} noValidate className="mt-5 space-y-4">
+      <form onSubmit={handleSubmit} noValidate className="mt-6 space-y-4">
         <div>
-          <label htmlFor={tokenId} className="block text-sm font-medium">
+          <label htmlFor={tokenId} className="text-ink block text-sm font-medium">
             Invitation code
           </label>
           <input
@@ -132,12 +125,12 @@ export function InviteAcceptForm() {
             value={token}
             onChange={(event) => setToken(event.target.value)}
             disabled={submitting}
-            className="mt-2 w-full rounded-lg border border-black/[.08] bg-transparent p-2.5 font-mono text-xs disabled:opacity-50 dark:border-white/[.145]"
+            className={`${FIELD_CLASS} font-data text-xs`}
           />
         </div>
 
         <div>
-          <label htmlFor={nameId} className="block text-sm font-medium">
+          <label htmlFor={nameId} className="text-ink block text-sm font-medium">
             Your name
           </label>
           <input
@@ -149,12 +142,12 @@ export function InviteAcceptForm() {
             value={displayName}
             onChange={(event) => setDisplayName(event.target.value)}
             disabled={submitting}
-            className="mt-2 w-full rounded-lg border border-black/[.08] bg-transparent p-2.5 text-sm disabled:opacity-50 dark:border-white/[.145]"
+            className={FIELD_CLASS}
           />
         </div>
 
         <div>
-          <label htmlFor={passwordId} className="block text-sm font-medium">
+          <label htmlFor={passwordId} className="text-ink block text-sm font-medium">
             Choose a password
           </label>
           <input
@@ -167,35 +160,27 @@ export function InviteAcceptForm() {
             onChange={(event) => setPassword(event.target.value)}
             disabled={submitting}
             aria-describedby={error ? `${hintId} ${errorId}` : hintId}
-            className="mt-2 w-full rounded-lg border border-black/[.08] bg-transparent p-2.5 text-sm disabled:opacity-50 dark:border-white/[.145]"
+            className={FIELD_CLASS}
           />
-          <p id={hintId} className="mt-1 text-xs text-black/60 dark:text-white/60">
+          <p id={hintId} className="text-ink-faint mt-1.5 text-xs">
             At least {MIN_PASSWORD_LENGTH} characters.
           </p>
         </div>
 
-        {error && (
-          <p id={errorId} role="alert" className="text-sm text-red-700 dark:text-red-400">
-            {error}
-          </p>
-        )}
+        {error && <FormError id={errorId} message={error} />}
 
-        <button
-          type="submit"
-          disabled={submitting}
-          className="w-full rounded-full border border-black/[.08] px-4 py-2 text-sm transition-colors hover:bg-black/[.04] disabled:opacity-50 dark:border-white/[.145] dark:hover:bg-white/[.06]"
-        >
+        <button type="submit" disabled={submitting} className={BUTTON_CLASS}>
           {submitting ? "Accepting…" : "Accept invitation"}
         </button>
       </form>
 
-      <p className="mt-5 text-sm text-black/60 dark:text-white/60">
+      <p className={`mt-6 ${MUTED_CLASS}`}>
         Already have an account?{" "}
-        <Link href="/login" className="underline underline-offset-2">
+        <Link href="/login" className={LINK_CLASS}>
           Sign in
         </Link>
         .
       </p>
-    </section>
+    </AuthCard>
   );
 }

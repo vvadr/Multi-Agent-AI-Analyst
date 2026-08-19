@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 
+import { AuthLayout } from "@/components/auth-layout";
 import { ForgotPasswordForm } from "@/components/forgot-password-form";
 
 export const metadata: Metadata = {
@@ -9,10 +10,8 @@ export const metadata: Metadata = {
 
 export default function ForgotPasswordPage() {
   return (
-    <div className="flex min-h-screen flex-col items-center justify-center p-8 font-sans">
-      <main className="flex w-full flex-col items-center">
-        <ForgotPasswordForm />
-      </main>
-    </div>
+    <AuthLayout>
+      <ForgotPasswordForm />
+    </AuthLayout>
   );
 }

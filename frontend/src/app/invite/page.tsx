@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Suspense } from "react";
 
+import { AuthLayout } from "@/components/auth-layout";
 import { InviteAcceptForm } from "@/components/invite-accept-form";
 
 export const metadata: Metadata = {
@@ -15,18 +16,16 @@ export const metadata: Metadata = {
  */
 export default function InvitePage() {
   return (
-    <div className="flex min-h-screen flex-col items-center justify-center p-8 font-sans">
-      <main className="flex w-full flex-col items-center">
-        <Suspense
-          fallback={
-            <p role="status" className="text-sm text-black/60 dark:text-white/60">
-              Loading your invitation…
-            </p>
-          }
-        >
-          <InviteAcceptForm />
-        </Suspense>
-      </main>
-    </div>
+    <AuthLayout>
+      <Suspense
+        fallback={
+          <p role="status" className="text-ink-dim text-sm">
+            Loading your invitation…
+          </p>
+        }
+      >
+        <InviteAcceptForm />
+      </Suspense>
+    </AuthLayout>
   );
 }

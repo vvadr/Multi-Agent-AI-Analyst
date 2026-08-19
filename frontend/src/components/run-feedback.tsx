@@ -1,8 +1,10 @@
 "use client";
 
+import { ThumbsDown, ThumbsUp } from "lucide-react";
 import { useState } from "react";
 
 import { submitRunFeedback } from "@/lib/api";
+import { cn } from "@/lib/cn";
 
 /**
  * A verdict on one answer.
@@ -31,33 +33,51 @@ export function RunFeedback({ runId }: { runId: string }) {
   };
 
   return (
-    <div className="mt-4 flex flex-wrap items-center gap-2">
-      <span className="text-xs text-black/60 dark:text-white/60">
-        Was this answer useful?
-      </span>
-      {([1, -1] as const).map((value) => (
-        <button
-          key={value}
-          type="button"
-          onClick={() => void send(value)}
-          aria-pressed={rating === value}
-          className={
-            "rounded-full border px-3 py-1 text-xs transition-colors " +
-            (rating === value
-              ? "border-black/40 bg-black/[.06] dark:border-white/40 dark:bg-white/[.10]"
-              : "border-black/[.08] hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-white/[.06]")
-          }
-        >
-          {value === 1 ? "Yes" : "No"}
-        </button>
-      ))}
+    <div className="border-line mt-5 flex flex-wrap items-center gap-2 border-t pt-4">
+      <span className="text-ink-faint text-xs">Was this answer useful?</span>
+
+      {([1, -1] as const).map((value) => {
+        const Icon = value === 1 ? ThumbsUp : ThumbsDown;
+        const active = rating === value;
+        const tone = value === 1 ? "var(--ok)" : "var(--bad)";
+        return (
+          <button
+            key={value}
+            type="button"
+            onClick={() => void send(value)}
+            aria-pressed={active}
+            className={cn(
+              "inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs transition-all duration-200",
+              active
+                ? "text-ink"
+                : "border-line text-ink-dim hover:border-line-strong hover:text-ink",
+            )}
+            style={
+              active
+                ? {
+                    borderColor: `color-mix(in oklab, ${tone} 45%, transparent)`,
+                    background: `color-mix(in oklab, ${tone} 12%, transparent)`,
+                  }
+                : undefined
+            }
+          >
+            <Icon
+              aria-hidden
+              className="h-3 w-3"
+              style={active ? { color: tone } : undefined}
+            />
+            {value === 1 ? "Yes" : "No"}
+          </button>
+        );
+      })}
+
       {rating !== null && !failed && (
-        <span role="status" className="text-xs text-black/60 dark:text-white/60">
+        <span role="status" className="text-ink-faint text-xs">
           Thanks.
         </span>
       )}
       {failed && (
-        <span role="alert" className="text-xs text-red-700 dark:text-red-400">
+        <span role="alert" className="text-bad text-xs">
           That could not be saved.
         </span>
       )}
