@@ -18,7 +18,12 @@ class Verdict:
 
 def review_answer(state: AgentState, *, generate: TextGenerator) -> Verdict:
     """Ask the model to check support, never returning raw model output to clients."""
-    source_parts = state["memory"] + state["documents"] + (
+    # The critic checks against exactly the material the answer was allowed to
+    # use and that the run will cite — which excludes recalled conversation.
+    # Including it would let the reviewer approve a claim on the strength of an
+    # earlier answer rather than a source, and approving unsupported claims is
+    # the single thing this step exists to prevent.
+    source_parts = state["documents"] + (
         [state["sql_result"]] if state["sql_result"] else []
     )
     evidence = "\n\n".join(source_parts)

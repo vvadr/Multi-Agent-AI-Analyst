@@ -153,9 +153,17 @@ def _build_graph(deps: WorkflowDependencies, *, emit: EventSink | None):
     def generate_answer(state: AgentState) -> dict[str, object]:
         with deps.observability.span("answer-generation", kind="chain"):
             publish("generating")
+            # Recalled conversation is deliberately absent from the evidence.
+            #
+            # Only the evidence agents produce citations, so anything answered
+            # out of memory arrives with no sources at all — and memory holds
+            # previous *answers*, meaning each recycled one is a summary of a
+            # summary, drifting from the document a little more each time. The
+            # recalled text still reaches the supervisor, which is where it is
+            # genuinely useful: working out what a follow-up refers to before
+            # choosing how to gather the evidence to answer it.
             evidence = "\n\n".join(
-                state["memory"]
-                + state["documents"]
+                state["documents"]
                 + ([state["sql_result"]] if state["sql_result"] else [])
             )
             prompt = (
